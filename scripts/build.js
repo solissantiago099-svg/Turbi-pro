@@ -73,6 +73,10 @@ async function route(requestUrl) {
 }
 
 let databaseReady;
+const DEMO_USERS = [
+  { id: "admin", username: "admin", passwordHash: "0ca132d6b5de89730619b605dd5a53399467a6d2fda3ef9d983ff900d08fbe54", name: "Administrador", email: "admin@tamiz.local", role: "supervisor", currentDriverId: null },
+  { id: "chofer", username: "chofer", passwordHash: "0da1c2e27296fc5b2f6fd4cca2048dcfc0a24dde628aa4daee606abc5a5d74d9", name: "Chofer Demo", email: "chofer@tamiz.local", role: "chofer", currentDriverId: 1 },
+];
 
 async function ensureDatabase(env) {
   if (!env.DB) throw new Error("No hay base D1 configurada");
@@ -80,9 +84,13 @@ async function ensureDatabase(env) {
   await env.DB.batch([
     env.DB.prepare("CREATE TABLE IF NOT EXISTS app_state (key TEXT PRIMARY KEY, value TEXT NOT NULL, revision INTEGER NOT NULL DEFAULT 0, updated_at TEXT NOT NULL, updated_by TEXT)"),
     env.DB.prepare("CREATE INDEX IF NOT EXISTS idx_app_state_updated_at ON app_state(updated_at)"),
-    env.DB.prepare("CREATE TABLE IF NOT EXISTS app_users (id TEXT PRIMARY KEY, email TEXT, name TEXT, role TEXT NOT NULL DEFAULT 'chofer', current_driver_id INTEGER, last_seen_at TEXT NOT NULL, created_at TEXT NOT NULL)"),
+    env.DB.prepare("CREATE TABLE IF NOT EXISTS app_users (id TEXT PRIMARY KEY, username TEXT UNIQUE, password_hash TEXT, email TEXT, name TEXT, role TEXT NOT NULL DEFAULT 'chofer', current_driver_id INTEGER, last_seen_at TEXT NOT NULL, created_at TEXT NOT NULL)"),
+    env.DB.prepare("CREATE TABLE IF NOT EXISTS app_sessions (token TEXT PRIMARY KEY, user_id TEXT NOT NULL, created_at TEXT NOT NULL, expires_at TEXT NOT NULL)"),
     env.DB.prepare("CREATE TABLE IF NOT EXISTS app_audit (id INTEGER PRIMARY KEY AUTOINCREMENT, user_id TEXT, user_email TEXT, action TEXT NOT NULL, entity TEXT NOT NULL, entity_id TEXT, created_at TEXT NOT NULL, details TEXT)"),
     env.DB.prepare("CREATE INDEX IF NOT EXISTS idx_app_users_role ON app_users(role)"),
+    env.DB.prepare("CREATE UNIQUE INDEX IF NOT EXISTS idx_app_users_username ON app_users(username)"),
+    env.DB.prepare("CREATE INDEX IF NOT EXISTS idx_app_sessions_user_id ON app_sessions(user_id)"),
+    env.DB.prepare("CREATE INDEX IF NOT EXISTS idx_app_sessions_expires_at ON app_sessions(expires_at)"),
     env.DB.prepare("CREATE INDEX IF NOT EXISTS idx_app_audit_created_at ON app_audit(created_at)"),
     env.DB.prepare("CREATE INDEX IF NOT EXISTS idx_app_audit_entity ON app_audit(entity, entity_id)"),
   ]);
@@ -90,38 +98,66 @@ async function ensureDatabase(env) {
   const columnNames = new Set((columns.results || []).map(column => column.name));
   if (!columnNames.has("revision")) await env.DB.prepare("ALTER TABLE app_state ADD COLUMN revision INTEGER NOT NULL DEFAULT 0").run();
   if (!columnNames.has("updated_by")) await env.DB.prepare("ALTER TABLE app_state ADD COLUMN updated_by TEXT").run();
+  const userColumns = await env.DB.prepare("PRAGMA table_info(app_users)").all();
+  const userColumnNames = new Set((userColumns.results || []).map(column => column.name));
+  if (!userColumnNames.has("username")) await env.DB.prepare("ALTER TABLE app_users ADD COLUMN username TEXT").run();
+  if (!userColumnNames.has("password_hash")) await env.DB.prepare("ALTER TABLE app_users ADD COLUMN password_hash TEXT").run();
+  for (const user of DEMO_USERS) {
+    await env.DB.prepare("INSERT INTO app_users (id, username, password_hash, email, name, role, current_driver_id, last_seen_at, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?) ON CONFLICT(id) DO UPDATE SET username = excluded.username, password_hash = excluded.password_hash, email = excluded.email, name = excluded.name, role = excluded.role, current_driver_id = COALESCE(app_users.current_driver_id, excluded.current_driver_id)")
+      .bind(user.id, user.username, user.passwordHash, user.email, user.name, user.role, user.currentDriverId, new Date().toISOString(), new Date().toISOString())
+      .run();
+  }
   await env.DB.prepare("PRAGMA optimize").run();
   databaseReady = true;
 }
 
-function decodeName(request) {
-  const encoded = request.headers.get("oai-authenticated-user-full-name");
-  if (!encoded || request.headers.get("oai-authenticated-user-full-name-encoding") !== "percent-encoded-utf-8") return "";
-  try { return decodeURIComponent(encoded); } catch { return ""; }
+function bearer(request) {
+  const header = request.headers.get("authorization") || "";
+  return header.toLowerCase().startsWith("bearer ") ? header.slice(7).trim() : "";
+}
+
+async function sha256(value) {
+  const bytes = new TextEncoder().encode(value);
+  const hash = await crypto.subtle.digest("SHA-256", bytes);
+  return [...new Uint8Array(hash)].map(byte => byte.toString(16).padStart(2, "0")).join("");
 }
 
 async function currentUser(request, env) {
   await ensureDatabase(env);
-  const headerId = request.headers.get("oai-authenticated-user-id");
-  const hostname = new URL(request.url).hostname;
-  if (!headerId && hostname !== "localhost" && hostname !== "127.0.0.1") return null;
-  const id = headerId || "local-preview-user";
-  const email = request.headers.get("oai-authenticated-user-email") || "local@tamiz";
-  const name = decodeName(request) || email;
   const now = new Date().toISOString();
-  let user = await env.DB.prepare("SELECT id, email, name, role, current_driver_id AS currentDriverId FROM app_users WHERE id = ?").bind(id).first();
-  if (!user) {
-    const supervisors = await env.DB.prepare("SELECT COUNT(*) AS total FROM app_users WHERE role = ?").bind("supervisor").first();
-    const role = Number(supervisors?.total || 0) === 0 ? "supervisor" : "chofer";
-    await env.DB.prepare("INSERT INTO app_users (id, email, name, role, last_seen_at, created_at) VALUES (?, ?, ?, ?, ?, ?)")
-      .bind(id, email, name, role, now, now)
-      .run();
-    user = { id, email, name, role, currentDriverId: null };
-  } else {
-    await env.DB.prepare("UPDATE app_users SET email = ?, name = ?, last_seen_at = ? WHERE id = ?").bind(email, name, now, id).run();
-    user.email = email; user.name = name;
-  }
+  await env.DB.prepare("DELETE FROM app_sessions WHERE expires_at < ?").bind(now).run();
+  const token = bearer(request);
+  if (!token) return null;
+  const user = await env.DB.prepare("SELECT u.id, u.username, u.email, u.name, u.role, u.current_driver_id AS currentDriverId FROM app_sessions s JOIN app_users u ON u.id = s.user_id WHERE s.token = ? AND s.expires_at > ?").bind(token, now).first();
+  if (!user) return null;
+  await env.DB.prepare("UPDATE app_users SET last_seen_at = ? WHERE id = ?").bind(now, user.id).run();
   return user;
+}
+
+async function login(request, env) {
+  await ensureDatabase(env);
+  const payload = await request.json().catch(() => ({}));
+  const username = String(payload.username || "").trim().toLowerCase();
+  const password = String(payload.password || "");
+  const user = await env.DB.prepare("SELECT id, username, email, name, role, current_driver_id AS currentDriverId, password_hash AS passwordHash FROM app_users WHERE lower(username) = ?").bind(username).first();
+  const hash = await sha256("tamiz-rutas:" + password);
+  if (!user || hash !== user.passwordHash) return Response.json({ error: "Usuario o contraseña incorrectos" }, { status: 401 });
+  const tokenBytes = new Uint8Array(32);
+  crypto.getRandomValues(tokenBytes);
+  const token = [...tokenBytes].map(byte => byte.toString(16).padStart(2, "0")).join("");
+  const now = new Date();
+  const expires = new Date(now.getTime() + 7 * 24 * 60 * 60 * 1000);
+  await env.DB.prepare("INSERT INTO app_sessions (token, user_id, created_at, expires_at) VALUES (?, ?, ?, ?)").bind(token, user.id, now.toISOString(), expires.toISOString()).run();
+  await audit(env, user, "login", "user", user.id);
+  delete user.passwordHash;
+  return Response.json({ token, user });
+}
+
+async function logout(request, env) {
+  await ensureDatabase(env);
+  const token = bearer(request);
+  if (token) await env.DB.prepare("DELETE FROM app_sessions WHERE token = ?").bind(token).run();
+  return Response.json({ ok: true });
 }
 
 async function audit(env, user, action, entity, entityId, details = null) {
@@ -193,6 +229,8 @@ async function writeState(request, env) {
 export default {
   async fetch(request, env) {
     const url = new URL(request.url);
+    if (url.pathname === "/api/login" && request.method === "POST") return login(request, env);
+    if (url.pathname === "/api/logout" && request.method === "POST") return logout(request, env);
     if (url.pathname === "/api/geocode") return geocode(url);
     if (url.pathname === "/api/route") return route(url);
     if (url.pathname === "/api/session" && request.method === "GET") return session(request, env);

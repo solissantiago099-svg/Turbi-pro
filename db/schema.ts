@@ -13,6 +13,8 @@ export const schema = {
     table: "app_users",
     columns: {
       id: "TEXT PRIMARY KEY",
+      username: "TEXT UNIQUE",
+      passwordHash: "TEXT",
       email: "TEXT",
       name: "TEXT",
       role: "TEXT NOT NULL DEFAULT 'chofer'",
@@ -32,6 +34,15 @@ export const schema = {
       entityId: "TEXT",
       createdAt: "TEXT NOT NULL",
       details: "TEXT",
+    },
+  },
+  appSessions: {
+    table: "app_sessions",
+    columns: {
+      token: "TEXT PRIMARY KEY",
+      userId: "TEXT NOT NULL",
+      createdAt: "TEXT NOT NULL",
+      expiresAt: "TEXT NOT NULL",
     },
   },
 };

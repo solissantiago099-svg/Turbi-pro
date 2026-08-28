@@ -10,14 +10,32 @@
   <title>TAMIZ RUTAS</title>
   <link rel="stylesheet" href="styles.css">
 </head>
-<body>
+<body class="auth-loading">
+  <section id="login-screen" class="login-screen" hidden>
+    <form id="login-form" class="login-card">
+      <span class="eyebrow">ACCESO OPERATIVO</span>
+      <h1>TAMIZ <span>RUTAS</span></h1>
+      <p>Ingresá para ver la agenda y operar la ruta compartida.</p>
+      <label>Usuario</label>
+      <input name="username" autocomplete="username" required>
+      <label>Contraseña</label>
+      <input name="password" type="password" autocomplete="current-password" required>
+      <button class="btn primary large">Entrar</button>
+      <div id="login-error" class="notice error" hidden>Usuario o contraseña incorrectos.</div>
+      <div class="login-hint">
+        <b>Prueba inicial</b>
+        <span>admin / admin123</span>
+        <span>chofer / chofer123</span>
+      </div>
+    </form>
+  </section>
   <button id="menu-toggle" class="menu-toggle" aria-label="Abrir menú">☰</button>
   <aside class="sidebar">
     <h2>TAMIZ <span>RUTAS</span></h2>
     <nav aria-label="Navegación principal">
       <button data-view="ruta">Mi ruta</button>
-      <button data-view="agenda">Agenda</button>
-      <button data-view="nueva" class="active">Nueva tarea</button>
+      <button data-view="agenda" class="active">Agenda</button>
+      <button data-view="nueva">Nueva tarea</button>
       <button data-view="supervision">Supervisión</button>
       <button data-view="vehiculos">Datos de vehículo</button>
       <button data-view="choferes">Choferes</button>
@@ -27,10 +45,10 @@
     <div class="sidebar-foot"><span class="demo-dot"></span> Integraciones en modo demo</div>
   </aside>
   <main>
-    <header><div><h1 id="title">Nueva tarea</h1><p id="subtitle">Crear y asignar un recorrido</p></div><span class="user-pill">Supervisor</span></header>
+    <header><div><h1 id="title">Agenda</h1><p id="subtitle">Planificación mensual</p></div><div class="header-actions"><span class="user-pill">Supervisor</span><button id="logout" class="btn">Salir</button></div></header>
     <section id="ruta" class="view"></section>
-    <section id="agenda" class="view"></section>
-    <section id="nueva" class="view active"></section>
+    <section id="agenda" class="view active"></section>
+    <section id="nueva" class="view"></section>
     <section id="supervision" class="view"></section>
     <section id="vehiculos" class="view"></section>
     <section id="choferes" class="view"></section>

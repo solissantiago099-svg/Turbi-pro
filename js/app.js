@@ -32,24 +32,25 @@ const seed = {
 };
 
 const db = storage.load(seed);
-let activeView = "nueva";
+let activeView = "agenda";
 let syncRevision = 0;
 let syncSaving = false;
-let currentUser = { name: "Supervisor", email: "", role: db.settings.role || "supervisor" };
+let currentUser = null;
+let sessionToken = localStorage.getItem("tamiz_session") || "";
 
 function currentUserName() {
-  return currentUser.name || currentUser.email || "Usuario";
+  return currentUser?.name || currentUser?.email || currentUser?.username || "Usuario";
 }
 
 function setUserPill(label) {
   const pill = $(".user-pill");
   if (!pill) return;
-  pill.textContent = label || `${currentUser.role === "chofer" ? "Chofer" : "Supervisor"} · ${currentUserName()}`;
+  pill.textContent = label || `${currentUser?.role === "chofer" ? "Chofer" : "Supervisor"} · ${currentUserName()}`;
 }
 
 function applyRoleAccess() {
   setUserPill();
-  const restricted = currentUser.role === "chofer" ? new Set(["nueva", "supervision", "vehiculos", "choferes", "reportes"]) : new Set();
+  const restricted = currentUser?.role === "chofer" ? new Set(["nueva", "supervision", "vehiculos", "choferes", "reportes"]) : new Set();
   $$("[data-view]").forEach(button => {
     const blocked = restricted.has(button.dataset.view);
     button.disabled = blocked;
@@ -71,9 +72,70 @@ function mergeRemote(payload, silent = false) {
   return true;
 }
 
+function authHeaders(extra = {}) {
+  return sessionToken ? { ...extra, authorization: `Bearer ${sessionToken}` } : extra;
+}
+
+function showLogin(message = "") {
+  document.body.classList.add("logged-out");
+  document.body.classList.remove("auth-loading");
+  $("#login-screen").hidden = false;
+  $("#login-error").hidden = !message;
+  if (message) $("#login-error").textContent = message;
+}
+
+function showApp() {
+  document.body.classList.remove("logged-out", "auth-loading");
+  $("#login-screen").hidden = true;
+}
+
+async function login(username, password) {
+  const response = await fetch("/api/login", {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify({ username, password }),
+  });
+  const payload = await response.json().catch(() => ({}));
+  if (!response.ok) throw new Error(payload.error || "No se pudo iniciar sesión");
+  sessionToken = payload.token;
+  localStorage.setItem("tamiz_session", sessionToken);
+  currentUser = payload.user;
+  showApp();
+  activeView = currentUser.role === "chofer" ? "ruta" : "agenda";
+  show(activeView);
+  await loadRemoteData();
+}
+
+async function logout() {
+  try { await fetch("/api/logout", { method: "POST", headers: authHeaders() }); } catch {}
+  sessionToken = "";
+  currentUser = null;
+  localStorage.removeItem("tamiz_session");
+  showLogin();
+}
+
+async function restoreSession() {
+  if (!sessionToken) return showLogin();
+  try {
+    const response = await fetch("/api/session", { headers: authHeaders({ accept: "application/json" }) });
+    if (!response.ok) throw new Error("Sesión vencida");
+    const payload = await response.json();
+    currentUser = payload.user;
+    showApp();
+    activeView = currentUser.role === "chofer" ? "ruta" : "agenda";
+    show(activeView);
+    await loadRemoteData();
+  } catch {
+    localStorage.removeItem("tamiz_session");
+    sessionToken = "";
+    showLogin("Tu sesión venció. Volvé a ingresar.");
+  }
+}
+
 async function loadRemoteData() {
   try {
-    const response = await fetch("/api/state", { headers: { accept: "application/json" } });
+    const response = await fetch("/api/state", { headers: authHeaders({ accept: "application/json" }) });
+    if (response.status === 401) return logout();
     if (!response.ok) throw new Error(`Estado remoto ${response.status}`);
     const payload = await response.json();
     if (payload.user) currentUser = { ...currentUser, ...payload.user };
@@ -95,7 +157,7 @@ async function saveRemoteData(message, action = "save-state") {
   try {
     const response = await fetch("/api/state", {
       method: "PUT",
-      headers: { "content-type": "application/json" },
+      headers: authHeaders({ "content-type": "application/json" }),
       body: JSON.stringify({ data: db, revision: syncRevision, action }),
     });
     const payload = await response.json().catch(() => ({}));
@@ -117,9 +179,10 @@ async function saveRemoteData(message, action = "save-state") {
 }
 
 async function refreshRemoteData() {
-  if (syncSaving) return;
+  if (syncSaving || !sessionToken) return;
   try {
-    const response = await fetch("/api/state", { headers: { accept: "application/json" } });
+    const response = await fetch("/api/state", { headers: authHeaders({ accept: "application/json" }) });
+    if (response.status === 401) return logout();
     if (!response.ok) return;
     const payload = await response.json();
     if (payload.user) currentUser = { ...currentUser, ...payload.user };
@@ -406,7 +469,8 @@ function renderReports() {
 
 async function loadUsers() {
   try {
-    const response = await fetch("/api/session", { headers: { accept: "application/json" } });
+    const response = await fetch("/api/session", { headers: authHeaders({ accept: "application/json" }) });
+    if (response.status === 401) return logout(), [];
     if (!response.ok) throw new Error(`Usuarios ${response.status}`);
     const payload = await response.json();
     if (payload.user) currentUser = { ...currentUser, ...payload.user };
@@ -420,7 +484,7 @@ async function loadUsers() {
 async function updateUserRole(id, role, currentDriverId) {
   const response = await fetch("/api/users", {
     method: "PUT",
-    headers: { "content-type": "application/json" },
+    headers: authHeaders({ "content-type": "application/json" }),
     body: JSON.stringify({ id, role, currentDriverId: Number(currentDriverId) || null }),
   });
   if (!response.ok) throw new Error(`Rol ${response.status}`);
@@ -432,7 +496,7 @@ async function updateUserRole(id, role, currentDriverId) {
 async function updateMyPreference(currentDriverId) {
   const response = await fetch("/api/me", {
     method: "PUT",
-    headers: { "content-type": "application/json" },
+    headers: authHeaders({ "content-type": "application/json" }),
     body: JSON.stringify({ currentDriverId: Number(currentDriverId) || null }),
   });
   if (!response.ok) throw new Error(`Preferencia ${response.status}`);
@@ -442,7 +506,7 @@ async function updateMyPreference(currentDriverId) {
 }
 
 function userManagement(users = []) {
-  if (currentUser.role !== "supervisor") return '<section class="card"><h2>Usuarios</h2><p>Tu perfil está configurado como chofer. Un supervisor puede habilitarte más funciones.</p></section>';
+  if (currentUser?.role !== "supervisor") return '<section class="card"><h2>Usuarios</h2><p>Tu perfil está configurado como chofer. Un supervisor puede habilitarte más funciones.</p></section>';
   const driverOptions = value => `<option value="">Sin chofer fijo</option>${db.drivers.map(driver => `<option value="${driver.id}" ${Number(value) === driver.id ? "selected" : ""}>${escapeHTML(driver.name)}</option>`).join("")}`;
   return `<section class="card"><h2>Usuarios conectados</h2><div class="user-admin">${users.map(user => `<article class="user-row" data-user-row="${escapeHTML(user.id)}"><div><b>${escapeHTML(user.name || user.email || "Usuario")}</b><small>${escapeHTML(user.email || "Sin email")} · ${user.lastSeenAt ? new Date(user.lastSeenAt).toLocaleString("es-AR") : "nuevo"}</small></div><select data-user-role="${escapeHTML(user.id)}"><option value="supervisor" ${user.role === "supervisor" ? "selected" : ""}>Supervisor</option><option value="chofer" ${user.role === "chofer" ? "selected" : ""}>Chofer</option></select><select data-user-driver="${escapeHTML(user.id)}">${driverOptions(user.currentDriverId)}</select><button class="btn" data-save-user="${escapeHTML(user.id)}">Guardar</button></article>`).join("") || '<p>Todavía no entraron otros usuarios.</p>'}</div></section>`;
 }
@@ -450,8 +514,8 @@ function userManagement(users = []) {
 async function renderSettings() {
   const users = await loadUsers();
   applyRoleAccess();
-  $("#configuracion").innerHTML = `<div class="settings-grid"><section class="card"><h2>Perfil operativo</h2><p><b>${escapeHTML(currentUserName())}</b><br><small>${escapeHTML(currentUser.email || "")}</small></p><div class="notice success"><b>Rol actual: ${currentUser.role === "chofer" ? "Chofer" : "Supervisor"}</b><br><small>La base se sincroniza automáticamente entre usuarios.</small></div><label>Chofer de Mi ruta</label><select id="current-driver">${db.drivers.map(driver => `<option value="${driver.id}">${escapeHTML(driver.name)}</option>`).join("")}</select><div class="notice success"><b>Rutas OSRM activas</b><br><small>No requiere API key · geocodificación © OpenStreetMap contributors · sin tráfico en vivo.</small></div><button class="btn primary" id="save-settings">Guardar preferencia</button></section><section class="card"><h2>Respaldo de datos</h2><p>Exportá toda la operación o restaurala en la base compartida.</p><div class="actions"><button class="btn" id="backup">Exportar respaldo</button><label class="btn file-btn">Importar respaldo<input id="restore" type="file" accept="application/json"></label><button class="btn danger" id="reset-demo">Restablecer demo</button></div></section>${userManagement(users)}</div>`;
-  $("#current-driver").value = currentUser.currentDriverId || db.settings.currentDriverId || db.drivers[0]?.id || "";
+  $("#configuracion").innerHTML = `<div class="settings-grid"><section class="card"><h2>Perfil operativo</h2><p><b>${escapeHTML(currentUserName())}</b><br><small>${escapeHTML(currentUser?.email || currentUser?.username || "")}</small></p><div class="notice success"><b>Rol actual: ${currentUser?.role === "chofer" ? "Chofer" : "Supervisor"}</b><br><small>La base se sincroniza automáticamente entre usuarios.</small></div><label>Chofer de Mi ruta</label><select id="current-driver">${db.drivers.map(driver => `<option value="${driver.id}">${escapeHTML(driver.name)}</option>`).join("")}</select><div class="notice success"><b>Rutas OSRM activas</b><br><small>No requiere API key · geocodificación © OpenStreetMap contributors · sin tráfico en vivo.</small></div><button class="btn primary" id="save-settings">Guardar preferencia</button></section><section class="card"><h2>Respaldo de datos</h2><p>Exportá toda la operación o restaurala en la base compartida.</p><div class="actions"><button class="btn" id="backup">Exportar respaldo</button><label class="btn file-btn">Importar respaldo<input id="restore" type="file" accept="application/json"></label><button class="btn danger" id="reset-demo">Restablecer demo</button></div></section>${userManagement(users)}</div>`;
+  $("#current-driver").value = currentUser?.currentDriverId || db.settings.currentDriverId || db.drivers[0]?.id || "";
   $("#save-settings").onclick = async () => { try { currentUser.currentDriverId = Number($("#current-driver").value); await updateMyPreference(currentUser.currentDriverId); toast("Preferencia guardada"); } catch { toast("No se pudo guardar la preferencia", "error"); } };
   $$("[data-save-user]").forEach(button => button.onclick = async () => { try { const id = button.dataset.saveUser; const nextUsers = await updateUserRole(id, $(`[data-user-role="${CSS.escape(id)}"]`).value, $(`[data-user-driver="${CSS.escape(id)}"]`).value); toast("Usuario actualizado"); $("#configuracion").innerHTML = `<div class="settings-grid"><section class="card"><h2>Perfil operativo</h2><p><b>${escapeHTML(currentUserName())}</b><br><small>${escapeHTML(currentUser.email || "")}</small></p><div class="notice success"><b>Rol actual: ${currentUser.role === "chofer" ? "Chofer" : "Supervisor"}</b><br><small>La base se sincroniza automáticamente entre usuarios.</small></div><label>Chofer de Mi ruta</label><select id="current-driver">${db.drivers.map(driver => `<option value="${driver.id}">${escapeHTML(driver.name)}</option>`).join("")}</select><button class="btn primary" id="save-settings">Guardar preferencia</button></section><section class="card"><h2>Respaldo de datos</h2><p>Exportá toda la operación o restaurala en la base compartida.</p><div class="actions"><button class="btn" id="backup">Exportar respaldo</button><label class="btn file-btn">Importar respaldo<input id="restore" type="file" accept="application/json"></label><button class="btn danger" id="reset-demo">Restablecer demo</button></div></section>${userManagement(nextUsers)}</div>`; renderSettings(); } catch { toast("No se pudo actualizar el usuario", "error"); } });
   $("#backup").onclick = () => download(`tamiz-respaldo-${localISO()}.json`, JSON.stringify({ version: 1, exportedAt: new Date().toISOString(), data: db }, null, 2), "application/json");
@@ -461,8 +525,23 @@ async function renderSettings() {
 
 $$('[data-view]').forEach(button => button.onclick = () => show(button.dataset.view));
 $("#menu-toggle").onclick = () => document.body.classList.toggle("menu-open");
+$("#logout").onclick = logout;
+$("#login-form").onsubmit = async event => {
+  event.preventDefault();
+  const form = event.currentTarget;
+  const button = $("button", form);
+  button.disabled = true;
+  try {
+    const data = new FormData(form);
+    await login(String(data.get("username") || "").trim(), String(data.get("password") || ""));
+    form.reset();
+  } catch (error) {
+    showLogin(error.message || "Usuario o contraseña incorrectos.");
+  } finally {
+    button.disabled = false;
+  }
+};
 document.addEventListener("pointerdown", event => { if (!document.body.classList.contains("menu-open")) return; if ($(".sidebar").contains(event.target) || $("#menu-toggle").contains(event.target)) return; document.body.classList.remove("menu-open"); });
 document.addEventListener("keydown", event => { if (event.key === "Escape") closeAgendaTaskModal(); });
-show("nueva");
-loadRemoteData();
+restoreSession();
 setInterval(refreshRemoteData, 8000);
