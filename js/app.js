@@ -33,37 +33,100 @@ const seed = {
 
 const db = storage.load(seed);
 let activeView = "nueva";
+let syncRevision = 0;
+let syncSaving = false;
+let currentUser = { name: "Supervisor", email: "", role: db.settings.role || "supervisor" };
+
+function currentUserName() {
+  return currentUser.name || currentUser.email || "Usuario";
+}
+
+function setUserPill(label) {
+  const pill = $(".user-pill");
+  if (!pill) return;
+  pill.textContent = label || `${currentUser.role === "chofer" ? "Chofer" : "Supervisor"} · ${currentUserName()}`;
+}
+
+function applyRoleAccess() {
+  setUserPill();
+  const restricted = currentUser.role === "chofer" ? new Set(["nueva", "supervision", "vehiculos", "choferes", "reportes"]) : new Set();
+  $$("[data-view]").forEach(button => {
+    const blocked = restricted.has(button.dataset.view);
+    button.disabled = blocked;
+    button.title = blocked ? "Disponible para supervisores" : "";
+  });
+  if (restricted.has(activeView)) show("ruta");
+}
+
+function mergeRemote(payload, silent = false) {
+  if (!payload?.data) return false;
+  Object.assign(db, payload.data);
+  db.settings ||= {};
+  storage.save(db);
+  syncRevision = Number(payload.revision || syncRevision || 0);
+  if (payload.user) currentUser = { ...currentUser, ...payload.user };
+  applyRoleAccess();
+  show(activeView);
+  if (!silent) toast("Datos sincronizados con la base");
+  return true;
+}
 
 async function loadRemoteData() {
   try {
     const response = await fetch("/api/state", { headers: { accept: "application/json" } });
     if (!response.ok) throw new Error(`Estado remoto ${response.status}`);
     const payload = await response.json();
+    if (payload.user) currentUser = { ...currentUser, ...payload.user };
     if (!payload.data) {
       await saveRemoteData("Base inicializada");
+      applyRoleAccess();
       return;
     }
-    Object.assign(db, payload.data);
-    storage.save(db);
-    show(activeView);
-    toast("Datos sincronizados con la base");
+    mergeRemote(payload);
   } catch (error) {
     console.warn("No se pudo sincronizar con la base.", error);
     toast("Modo local: no se pudo conectar con la base", "error");
   }
 }
 
-async function saveRemoteData(message) {
+async function saveRemoteData(message, action = "save-state") {
+  if (syncSaving) return;
+  syncSaving = true;
   try {
     const response = await fetch("/api/state", {
       method: "PUT",
       headers: { "content-type": "application/json" },
-      body: JSON.stringify({ data: db }),
+      body: JSON.stringify({ data: db, revision: syncRevision, action }),
     });
+    const payload = await response.json().catch(() => ({}));
+    if (response.status === 409) {
+      mergeRemote(payload);
+      toast("Otro usuario guardó cambios. Actualicé tu pantalla.", "error");
+      return;
+    }
     if (!response.ok) throw new Error(`Guardado remoto ${response.status}`);
+    syncRevision = Number(payload.revision || syncRevision);
+    if (payload.user) currentUser = { ...currentUser, ...payload.user };
+    applyRoleAccess();
   } catch (error) {
     console.warn("No se pudo guardar en la base.", error);
     toast("Guardado local. La base no respondió.", "error");
+  } finally {
+    syncSaving = false;
+  }
+}
+
+async function refreshRemoteData() {
+  if (syncSaving) return;
+  try {
+    const response = await fetch("/api/state", { headers: { accept: "application/json" } });
+    if (!response.ok) return;
+    const payload = await response.json();
+    if (payload.user) currentUser = { ...currentUser, ...payload.user };
+    if (Number(payload.revision || 0) > syncRevision) mergeRemote(payload, true);
+    else applyRoleAccess();
+  } catch (error) {
+    console.warn("No se pudo refrescar la base.", error);
   }
 }
 
@@ -88,8 +151,8 @@ const viewMeta = {
   ruta: ["Mi ruta", "Operación diaria del chofer"], agenda: ["Agenda", "Planificación mensual"], nueva: ["Nueva tarea", "Crear y asignar un recorrido"], supervision: ["Supervisión", "Centro de control operativo"], vehiculos: ["Datos de vehículo", "Documentación, estado y mantenimiento"], choferes: ["Choferes", "Disponibilidad y registros"], reportes: ["Reportes", "Indicadores y exportación"], contactos: ["Contactos", "Referencias de entrega"], configuracion: ["Configuración", "Datos y preferencias"],
 };
 
-function persist(message = "Cambios guardados") {
-  if (storage.save(db)) { toast(message); saveRemoteData(message); }
+function persist(message = "Cambios guardados", action = "save-state") {
+  if (storage.save(db)) { toast(message); saveRemoteData(message, action); }
   else toast("No se pudo guardar. Revisá el espacio del navegador.", "error");
 }
 
@@ -114,7 +177,7 @@ function show(view, options = {}) {
 }
 
 function currentDriverTasks() {
-  const driverId = db.settings.currentDriverId;
+  const driverId = currentUser.currentDriverId || db.settings.currentDriverId;
   return db.tasks.filter(task => task.date === localISO() && (!task.driverId || task.driverId === driverId));
 }
 
@@ -163,15 +226,15 @@ function bindTaskCard(card) {
     event.stopPropagation(); const action = control.dataset.action;
     if (action === "map") return window.open(taskRouteURL(task), "_blank", "noopener");
     if (action === "call") return location.href = `tel:${task.phone}`;
-    if (action === "cancel") { if (confirm("¿Cancelar esta tarea?")) { task.status = "cancelada"; task.audit = [...(task.audit || []), { action: "cancel", at: new Date().toISOString(), user: db.settings.role }]; persist("Tarea cancelada"); renderRoute(); } return; }
+    if (action === "cancel") { if (confirm("¿Cancelar esta tarea?")) { task.status = "cancelada"; task.audit = [...(task.audit || []), { action: "cancel", at: new Date().toISOString(), user: currentUserName() }]; persist("Tarea cancelada", "task-cancel"); renderRoute(); } return; }
     if (action === "file") { const file = control.files?.[0]; if (file) { if (file.size > 1_500_000) return toast("El archivo supera 1,5 MB.", "error"); const reader = new FileReader(); reader.onload = () => { task.receipt = { name: file.name, type: file.type, data: reader.result, savedAt: new Date().toISOString() }; persist("Comprobante guardado"); renderRoute(); }; reader.readAsDataURL(file); } return; }
     if (action === "problem") { const note = prompt("Describí el problema:"); if (note) { task.incidents = [...(task.incidents || []), { note, at: new Date().toISOString() }]; persist("Incidencia informada"); } return; }
     const now = new Date().toISOString();
     if (action === "start") { task.status = "en-trabajo"; task.actualStart = now; }
     if (action === "arrive") { task.status = "en-destino"; task.actualArrival = now; }
     if (action === "finish") { task.status = "realizada"; task.actualEnd = now; task.destinationSeconds = task.actualArrival ? Math.floor((Date.now() - new Date(task.actualArrival)) / 1000) : 0; }
-    task.audit = [...(task.audit || []), { action, at: now, user: db.settings.role }];
-    persist(`Tarea actualizada: ${statusLabel(task.status)}`); renderRoute();
+    task.audit = [...(task.audit || []), { action, at: now, user: currentUserName() }];
+    persist(`Tarea actualizada: ${statusLabel(task.status)}`, `task-${action}`); renderRoute();
   });
 }
 
@@ -236,7 +299,7 @@ function renderNewTask(prefill = localISO(), prefillTime = "") {
   $$("[data-address-target]", form).forEach(button => button.onclick = () => { const input = form.elements[button.dataset.addressTarget]; input.value = button.dataset.address; input.dispatchEvent(new Event("input", { bubbles: true })); input.focus(); });
   const updatePreview = () => { const data = new FormData(form), estimated = Number(data.get("duration")); $("#preview").innerHTML = `<p><b>${escapeHTML(data.get("title") || "Nueva tarea")}</b></p><p>${escapeHTML(data.get("origin") || "Origen")} → ${escapeHTML(data.get("destination") || "Destino opcional / paradas")}</p><p>${data.get("start") || "—"} · ${estimated || "sin calcular"} min${form.dataset.distance ? ` · ${form.dataset.distance} km` : ""}</p>`; };
   form.oninput = event => { updatePreview(); if (["origin", "destination", "stops"].includes(event.target.name)) { clearTimeout(routeEstimateTimer); form.elements.assigned.value = ""; form.elements.duration.value = ""; form.dataset.distance = ""; routeEstimateTimer = setTimeout(() => calculateOSRMRoute(form), 900); } }; form.addEventListener("route-updated", updatePreview);
-  form.onsubmit = async event => { event.preventDefault(); const data = new FormData(form), assigned = Number(data.get("assigned")), duration = Number(data.get("duration")); const start = minutesFromTime(data.get("start")), end = start + assigned; const conflict = db.tasks.some(task => task.date === data.get("date") && Number(task.driverId) === Number(data.get("driverId")) && start < minutesFromTime(task.start) + Number(task.assigned || task.duration || 0) && end > minutesFromTime(task.start)); if (conflict) return toast("El chofer ya tiene una tarea en ese intervalo.", "error"); const driver = db.drivers.find(d => d.id === Number(data.get("driverId"))); const vehicle = db.vehicles.find(v => v.id === Number(data.get("vehicleId"))); if (driver && daysUntil(driver.licenseExpiry) < 0) return toast("El registro del chofer está vencido.", "error"); if (!vehicle || ["en-taller", "fuera-de-servicio"].includes(vehicle.status)) return toast("El vehículo no está disponible.", "error"); const invalidDoc = vehicle.docs?.find(doc => ["RTO", "Seguro / póliza"].includes(doc.name) && daysUntil(doc.expiry) < 0); if (invalidDoc) return toast(`${invalidDoc.name} está vencido.`, "error"); const pdfFile = form.elements.merchandisePdf.files[0]; let merchandisePdf = null; if (pdfFile) { if (pdfFile.type !== "application/pdf") return toast("El adjunto debe ser un archivo PDF.", "error"); if (pdfFile.size > 1500000) return toast("El PDF supera el máximo de 1,5 MB.", "error"); try { merchandisePdf = { name: pdfFile.name, size: pdfFile.size, data: await fileToDataURL(pdfFile) }; } catch { return toast("No se pudo leer el PDF.", "error"); } } const newTask = { id: Date.now(), title: data.get("title"), description: data.get("title"), merchandise: data.get("merchandise"), quantities: data.get("quantities"), merchandisePdf, observations: data.get("observations"), date: data.get("date"), start: data.get("start"), assigned, duration, origin: data.get("origin"), destination: data.get("destination"), stops: String(data.get("stops") || "").split("\n").map(s => s.trim()).filter(Boolean), contact: data.get("contact"), phone: data.get("phone"), assignedBy: data.get("assignedBy"), driverId: Number(data.get("driverId")), vehicleId: Number(data.get("vehicleId")), distance: Number(form.dataset.distance || 0), routeCoordinates: form.dataset.routeCoordinates ? JSON.parse(form.dataset.routeCoordinates) : [], status: "pendiente", createdAt: new Date().toISOString(), audit: [{ action: "created", at: new Date().toISOString(), user: db.settings.role }] }; db.tasks.push(newTask); agendaFocusTaskId = newTask.id; persist("Tarea guardada y visible en Agenda"); agendaSelectedDate = data.get("date"); agendaCursor = agendaDate(agendaSelectedDate); show("agenda"); };
+  form.onsubmit = async event => { event.preventDefault(); const data = new FormData(form), assigned = Number(data.get("assigned")), duration = Number(data.get("duration")); const start = minutesFromTime(data.get("start")), end = start + assigned; const conflict = db.tasks.some(task => task.date === data.get("date") && Number(task.driverId) === Number(data.get("driverId")) && start < minutesFromTime(task.start) + Number(task.assigned || task.duration || 0) && end > minutesFromTime(task.start)); if (conflict) return toast("El chofer ya tiene una tarea en ese intervalo.", "error"); const driver = db.drivers.find(d => d.id === Number(data.get("driverId"))); const vehicle = db.vehicles.find(v => v.id === Number(data.get("vehicleId"))); if (driver && daysUntil(driver.licenseExpiry) < 0) return toast("El registro del chofer está vencido.", "error"); if (!vehicle || ["en-taller", "fuera-de-servicio"].includes(vehicle.status)) return toast("El vehículo no está disponible.", "error"); const invalidDoc = vehicle.docs?.find(doc => ["RTO", "Seguro / póliza"].includes(doc.name) && daysUntil(doc.expiry) < 0); if (invalidDoc) return toast(`${invalidDoc.name} está vencido.`, "error"); const pdfFile = form.elements.merchandisePdf.files[0]; let merchandisePdf = null; if (pdfFile) { if (pdfFile.type !== "application/pdf") return toast("El adjunto debe ser un archivo PDF.", "error"); if (pdfFile.size > 1500000) return toast("El PDF supera el máximo de 1,5 MB.", "error"); try { merchandisePdf = { name: pdfFile.name, size: pdfFile.size, data: await fileToDataURL(pdfFile) }; } catch { return toast("No se pudo leer el PDF.", "error"); } } const newTask = { id: Date.now(), title: data.get("title"), description: data.get("title"), merchandise: data.get("merchandise"), quantities: data.get("quantities"), merchandisePdf, observations: data.get("observations"), date: data.get("date"), start: data.get("start"), assigned, duration, origin: data.get("origin"), destination: data.get("destination"), stops: String(data.get("stops") || "").split("\n").map(s => s.trim()).filter(Boolean), contact: data.get("contact"), phone: data.get("phone"), assignedBy: data.get("assignedBy"), driverId: Number(data.get("driverId")), vehicleId: Number(data.get("vehicleId")), distance: Number(form.dataset.distance || 0), routeCoordinates: form.dataset.routeCoordinates ? JSON.parse(form.dataset.routeCoordinates) : [], status: "pendiente", createdAt: new Date().toISOString(), createdBy: currentUserName(), audit: [{ action: "created", at: new Date().toISOString(), user: currentUserName() }] }; db.tasks.push(newTask); agendaFocusTaskId = newTask.id; persist("Tarea guardada y visible en Agenda", "task-create"); agendaSelectedDate = data.get("date"); agendaCursor = agendaDate(agendaSelectedDate); show("agenda"); };
 }
 
 function addMinutes(time, minutes) { if (!time) return "—"; const total = minutesFromTime(time) + minutes; return `${String(Math.floor(total / 60) % 24).padStart(2, "0")}:${String(total % 60).padStart(2, "0")}`; }
@@ -341,13 +404,59 @@ function renderReports() {
   $("#export-csv").onclick = () => { const headers = ["fecha","hora","estado","origen","destino","chofer","vehículo","duración","distancia"]; const rows = db.tasks.map(task => [task.date,task.start,statusLabel(task.status),task.origin,task.destination,db.drivers.find(d=>d.id===task.driverId)?.name || "",db.vehicles.find(v=>v.id===task.vehicleId)?.plate || "",task.duration,task.distance].map(csvCell).join(",")); download(`tamiz-reporte-${localISO()}.csv`, [headers.join(","), ...rows].join("\r\n"), "text/csv;charset=utf-8"); };
 }
 
-function renderSettings() {
-  $("#configuracion").innerHTML = `<div class="settings-grid"><section class="card"><h2>Perfil operativo</h2><label>Rol</label><select id="role"><option value="supervisor">Supervisor</option><option value="chofer">Chofer</option></select><label>Chofer de Mi ruta</label><select id="current-driver">${db.drivers.map(driver => `<option value="${driver.id}">${escapeHTML(driver.name)}</option>`).join("")}</select><div class="notice success"><b>Rutas OSRM activas</b><br><small>No requiere API key · geocodificación © OpenStreetMap contributors · sin tráfico en vivo.</small></div><button class="btn primary" id="save-settings">Guardar preferencias</button></section><section class="card"><h2>Respaldo de datos</h2><p>Exportá toda la operación o restaurala en este navegador.</p><div class="actions"><button class="btn" id="backup">Exportar respaldo</button><label class="btn file-btn">Importar respaldo<input id="restore" type="file" accept="application/json"></label><button class="btn danger" id="reset-demo">Restablecer demo</button></div></section></div>`;
-  $("#role").value = db.settings.role || "supervisor"; $("#current-driver").value = db.settings.currentDriverId;
-  $("#save-settings").onclick = () => { db.settings.role = $("#role").value; db.settings.currentDriverId = Number($("#current-driver").value); $(".user-pill").textContent = db.settings.role === "chofer" ? "Chofer" : "Supervisor"; persist("Preferencias guardadas"); };
+async function loadUsers() {
+  try {
+    const response = await fetch("/api/session", { headers: { accept: "application/json" } });
+    if (!response.ok) throw new Error(`Usuarios ${response.status}`);
+    const payload = await response.json();
+    if (payload.user) currentUser = { ...currentUser, ...payload.user };
+    return payload.users || [];
+  } catch (error) {
+    console.warn("No se pudo cargar usuarios.", error);
+    return [];
+  }
+}
+
+async function updateUserRole(id, role, currentDriverId) {
+  const response = await fetch("/api/users", {
+    method: "PUT",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify({ id, role, currentDriverId: Number(currentDriverId) || null }),
+  });
+  if (!response.ok) throw new Error(`Rol ${response.status}`);
+  const payload = await response.json();
+  if (payload.user) currentUser = { ...currentUser, ...payload.user };
+  return payload.users || [];
+}
+
+async function updateMyPreference(currentDriverId) {
+  const response = await fetch("/api/me", {
+    method: "PUT",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify({ currentDriverId: Number(currentDriverId) || null }),
+  });
+  if (!response.ok) throw new Error(`Preferencia ${response.status}`);
+  const payload = await response.json();
+  if (payload.user) currentUser = { ...currentUser, ...payload.user };
+  applyRoleAccess();
+}
+
+function userManagement(users = []) {
+  if (currentUser.role !== "supervisor") return '<section class="card"><h2>Usuarios</h2><p>Tu perfil está configurado como chofer. Un supervisor puede habilitarte más funciones.</p></section>';
+  const driverOptions = value => `<option value="">Sin chofer fijo</option>${db.drivers.map(driver => `<option value="${driver.id}" ${Number(value) === driver.id ? "selected" : ""}>${escapeHTML(driver.name)}</option>`).join("")}`;
+  return `<section class="card"><h2>Usuarios conectados</h2><div class="user-admin">${users.map(user => `<article class="user-row" data-user-row="${escapeHTML(user.id)}"><div><b>${escapeHTML(user.name || user.email || "Usuario")}</b><small>${escapeHTML(user.email || "Sin email")} · ${user.lastSeenAt ? new Date(user.lastSeenAt).toLocaleString("es-AR") : "nuevo"}</small></div><select data-user-role="${escapeHTML(user.id)}"><option value="supervisor" ${user.role === "supervisor" ? "selected" : ""}>Supervisor</option><option value="chofer" ${user.role === "chofer" ? "selected" : ""}>Chofer</option></select><select data-user-driver="${escapeHTML(user.id)}">${driverOptions(user.currentDriverId)}</select><button class="btn" data-save-user="${escapeHTML(user.id)}">Guardar</button></article>`).join("") || '<p>Todavía no entraron otros usuarios.</p>'}</div></section>`;
+}
+
+async function renderSettings() {
+  const users = await loadUsers();
+  applyRoleAccess();
+  $("#configuracion").innerHTML = `<div class="settings-grid"><section class="card"><h2>Perfil operativo</h2><p><b>${escapeHTML(currentUserName())}</b><br><small>${escapeHTML(currentUser.email || "")}</small></p><div class="notice success"><b>Rol actual: ${currentUser.role === "chofer" ? "Chofer" : "Supervisor"}</b><br><small>La base se sincroniza automáticamente entre usuarios.</small></div><label>Chofer de Mi ruta</label><select id="current-driver">${db.drivers.map(driver => `<option value="${driver.id}">${escapeHTML(driver.name)}</option>`).join("")}</select><div class="notice success"><b>Rutas OSRM activas</b><br><small>No requiere API key · geocodificación © OpenStreetMap contributors · sin tráfico en vivo.</small></div><button class="btn primary" id="save-settings">Guardar preferencia</button></section><section class="card"><h2>Respaldo de datos</h2><p>Exportá toda la operación o restaurala en la base compartida.</p><div class="actions"><button class="btn" id="backup">Exportar respaldo</button><label class="btn file-btn">Importar respaldo<input id="restore" type="file" accept="application/json"></label><button class="btn danger" id="reset-demo">Restablecer demo</button></div></section>${userManagement(users)}</div>`;
+  $("#current-driver").value = currentUser.currentDriverId || db.settings.currentDriverId || db.drivers[0]?.id || "";
+  $("#save-settings").onclick = async () => { try { currentUser.currentDriverId = Number($("#current-driver").value); await updateMyPreference(currentUser.currentDriverId); toast("Preferencia guardada"); } catch { toast("No se pudo guardar la preferencia", "error"); } };
+  $$("[data-save-user]").forEach(button => button.onclick = async () => { try { const id = button.dataset.saveUser; const nextUsers = await updateUserRole(id, $(`[data-user-role="${CSS.escape(id)}"]`).value, $(`[data-user-driver="${CSS.escape(id)}"]`).value); toast("Usuario actualizado"); $("#configuracion").innerHTML = `<div class="settings-grid"><section class="card"><h2>Perfil operativo</h2><p><b>${escapeHTML(currentUserName())}</b><br><small>${escapeHTML(currentUser.email || "")}</small></p><div class="notice success"><b>Rol actual: ${currentUser.role === "chofer" ? "Chofer" : "Supervisor"}</b><br><small>La base se sincroniza automáticamente entre usuarios.</small></div><label>Chofer de Mi ruta</label><select id="current-driver">${db.drivers.map(driver => `<option value="${driver.id}">${escapeHTML(driver.name)}</option>`).join("")}</select><button class="btn primary" id="save-settings">Guardar preferencia</button></section><section class="card"><h2>Respaldo de datos</h2><p>Exportá toda la operación o restaurala en la base compartida.</p><div class="actions"><button class="btn" id="backup">Exportar respaldo</button><label class="btn file-btn">Importar respaldo<input id="restore" type="file" accept="application/json"></label><button class="btn danger" id="reset-demo">Restablecer demo</button></div></section>${userManagement(nextUsers)}</div>`; renderSettings(); } catch { toast("No se pudo actualizar el usuario", "error"); } });
   $("#backup").onclick = () => download(`tamiz-respaldo-${localISO()}.json`, JSON.stringify({ version: 1, exportedAt: new Date().toISOString(), data: db }, null, 2), "application/json");
-  $("#restore").onchange = event => { const file = event.target.files[0]; if (!file) return; const reader = new FileReader(); reader.onload = () => { try { const parsed = JSON.parse(reader.result), data = parsed.data || parsed; if (!Array.isArray(data.tasks) || !Array.isArray(data.vehicles) || !Array.isArray(data.drivers)) throw new Error(); Object.assign(db, data); persist("Respaldo restaurado"); renderSettings(); } catch { toast("El respaldo no tiene un formato válido.", "error"); } }; reader.readAsText(file); };
-  $("#reset-demo").onclick = () => { if (!confirm("Esto reemplazará todos los datos locales por la demo inicial. ¿Continuar?")) return; Object.assign(db, clone(seed)); persist("Datos demo restaurados"); renderSettings(); };
+  $("#restore").onchange = event => { const file = event.target.files[0]; if (!file) return; const reader = new FileReader(); reader.onload = () => { try { const parsed = JSON.parse(reader.result), data = parsed.data || parsed; if (!Array.isArray(data.tasks) || !Array.isArray(data.vehicles) || !Array.isArray(data.drivers)) throw new Error(); Object.assign(db, data); persist("Respaldo restaurado", "restore-backup"); renderSettings(); } catch { toast("El respaldo no tiene un formato válido.", "error"); } }; reader.readAsText(file); };
+  $("#reset-demo").onclick = () => { if (!confirm("Esto reemplazará todos los datos compartidos por la demo inicial. ¿Continuar?")) return; Object.assign(db, clone(seed)); persist("Datos demo restaurados", "reset-demo"); renderSettings(); };
 }
 
 $$('[data-view]').forEach(button => button.onclick = () => show(button.dataset.view));
@@ -356,3 +465,4 @@ document.addEventListener("pointerdown", event => { if (!document.body.classList
 document.addEventListener("keydown", event => { if (event.key === "Escape") closeAgendaTaskModal(); });
 show("nueva");
 loadRemoteData();
+setInterval(refreshRemoteData, 8000);
