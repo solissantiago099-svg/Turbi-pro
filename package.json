@@ -1,0 +1,9 @@
+{
+  "name": "tamiz-rutas-mvp",
+  "version": "1.0.0",
+  "private": true,
+  "description": "MVP web para gestion de rutas, tareas, choferes y vehiculos.",
+  "scripts": {
+    "build": "node scripts/build.js"
+  }
+}

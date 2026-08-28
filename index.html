@@ -1,0 +1,43 @@
+<!doctype html>
+<html lang="es">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="theme-color" content="#09213b">
+  <meta name="mobile-web-app-capable" content="yes">
+  <meta name="apple-mobile-web-app-capable" content="yes">
+  <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+  <title>TAMIZ RUTAS</title>
+  <link rel="stylesheet" href="styles.css">
+</head>
+<body>
+  <button id="menu-toggle" class="menu-toggle" aria-label="Abrir menú">☰</button>
+  <aside class="sidebar">
+    <h2>TAMIZ <span>RUTAS</span></h2>
+    <nav aria-label="Navegación principal">
+      <button data-view="ruta">Mi ruta</button>
+      <button data-view="agenda">Agenda</button>
+      <button data-view="nueva" class="active">Nueva tarea</button>
+      <button data-view="supervision">Supervisión</button>
+      <button data-view="vehiculos">Datos de vehículo</button>
+      <button data-view="choferes">Choferes</button>
+      <button data-view="contactos">Contactos</button>
+      <button data-view="configuracion">Configuración</button>
+    </nav>
+    <div class="sidebar-foot"><span class="demo-dot"></span> Integraciones en modo demo</div>
+  </aside>
+  <main>
+    <header><div><h1 id="title">Nueva tarea</h1><p id="subtitle">Crear y asignar un recorrido</p></div><span class="user-pill">Supervisor</span></header>
+    <section id="ruta" class="view"></section>
+    <section id="agenda" class="view"></section>
+    <section id="nueva" class="view active"></section>
+    <section id="supervision" class="view"></section>
+    <section id="vehiculos" class="view"></section>
+    <section id="choferes" class="view"></section>
+    <section id="reportes" class="view"></section>
+    <section id="contactos" class="view"></section>
+    <section id="configuracion" class="view"></section>
+  </main>
+  <script src="js/app.js?v=20260828-mobile-all"></script>
+</body>
+</html>
