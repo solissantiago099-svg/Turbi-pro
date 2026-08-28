@@ -40,10 +40,11 @@ function decode(base64) {
 function assetResponse(pathname) {
   const asset = ASSETS[pathname] || (pathname.endsWith("/") ? ASSETS[pathname + "index.html"] : null);
   if (!asset) return null;
+  const noCache = pathname === "/" || pathname.endsWith(".html") || pathname.endsWith(".js") || pathname.endsWith(".css");
   return new Response(decode(asset.body), {
     headers: {
       "content-type": asset.type,
-      "cache-control": pathname === "/" || pathname.endsWith(".html") ? "no-cache" : "public, max-age=31536000, immutable",
+      "cache-control": noCache ? "no-cache, no-store, must-revalidate" : "public, max-age=31536000, immutable",
     },
   });
 }
