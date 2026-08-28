@@ -88,7 +88,6 @@ async function ensureDatabase(env) {
     env.DB.prepare("CREATE TABLE IF NOT EXISTS app_sessions (token TEXT PRIMARY KEY, user_id TEXT NOT NULL, created_at TEXT NOT NULL, expires_at TEXT NOT NULL)"),
     env.DB.prepare("CREATE TABLE IF NOT EXISTS app_audit (id INTEGER PRIMARY KEY AUTOINCREMENT, user_id TEXT, user_email TEXT, action TEXT NOT NULL, entity TEXT NOT NULL, entity_id TEXT, created_at TEXT NOT NULL, details TEXT)"),
     env.DB.prepare("CREATE INDEX IF NOT EXISTS idx_app_users_role ON app_users(role)"),
-    env.DB.prepare("CREATE UNIQUE INDEX IF NOT EXISTS idx_app_users_username ON app_users(username)"),
     env.DB.prepare("CREATE INDEX IF NOT EXISTS idx_app_sessions_user_id ON app_sessions(user_id)"),
     env.DB.prepare("CREATE INDEX IF NOT EXISTS idx_app_sessions_expires_at ON app_sessions(expires_at)"),
     env.DB.prepare("CREATE INDEX IF NOT EXISTS idx_app_audit_created_at ON app_audit(created_at)"),
@@ -102,6 +101,7 @@ async function ensureDatabase(env) {
   const userColumnNames = new Set((userColumns.results || []).map(column => column.name));
   if (!userColumnNames.has("username")) await env.DB.prepare("ALTER TABLE app_users ADD COLUMN username TEXT").run();
   if (!userColumnNames.has("password_hash")) await env.DB.prepare("ALTER TABLE app_users ADD COLUMN password_hash TEXT").run();
+  await env.DB.prepare("CREATE UNIQUE INDEX IF NOT EXISTS idx_app_users_username ON app_users(username)").run();
   for (const user of DEMO_USERS) {
     await env.DB.prepare("INSERT INTO app_users (id, username, password_hash, email, name, role, current_driver_id, last_seen_at, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?) ON CONFLICT(id) DO UPDATE SET username = excluded.username, password_hash = excluded.password_hash, email = excluded.email, name = excluded.name, role = excluded.role, current_driver_id = COALESCE(app_users.current_driver_id, excluded.current_driver_id)")
       .bind(user.id, user.username, user.passwordHash, user.email, user.name, user.role, user.currentDriverId, new Date().toISOString(), new Date().toISOString())
