@@ -72,11 +72,44 @@ async function route(requestUrl) {
   return new Response(response.body, { status: response.status, headers: { "content-type": "application/json; charset=utf-8", "cache-control": "no-store" } });
 }
 
+let databaseReady;
+
+async function ensureDatabase(env) {
+  if (!env.DB) throw new Error("No hay base D1 configurada");
+  if (databaseReady) return;
+  await env.DB.batch([
+    env.DB.prepare("CREATE TABLE IF NOT EXISTS app_state (key TEXT PRIMARY KEY, value TEXT NOT NULL, updated_at TEXT NOT NULL)"),
+    env.DB.prepare("CREATE INDEX IF NOT EXISTS idx_app_state_updated_at ON app_state(updated_at)"),
+  ]);
+  await env.DB.prepare("PRAGMA optimize").run();
+  databaseReady = true;
+}
+
+async function readState(env) {
+  await ensureDatabase(env);
+  const row = await env.DB.prepare("SELECT value FROM app_state WHERE key = ?").bind("default").first();
+  return Response.json({ data: row ? JSON.parse(row.value) : null }, { headers: { "cache-control": "no-store" } });
+}
+
+async function writeState(request, env) {
+  await ensureDatabase(env);
+  const payload = await request.json();
+  if (!payload || typeof payload !== "object" || !payload.data || !Array.isArray(payload.data.tasks) || !Array.isArray(payload.data.vehicles) || !Array.isArray(payload.data.drivers)) {
+    return Response.json({ error: "Estado invalido" }, { status: 400 });
+  }
+  await env.DB.prepare("INSERT INTO app_state (key, value, updated_at) VALUES (?, ?, ?) ON CONFLICT(key) DO UPDATE SET value = excluded.value, updated_at = excluded.updated_at")
+    .bind("default", JSON.stringify(payload.data), new Date().toISOString())
+    .run();
+  return Response.json({ ok: true });
+}
+
 export default {
-  async fetch(request) {
+  async fetch(request, env) {
     const url = new URL(request.url);
     if (url.pathname === "/api/geocode") return geocode(url);
     if (url.pathname === "/api/route") return route(url);
+    if (url.pathname === "/api/state" && request.method === "GET") return readState(env);
+    if (url.pathname === "/api/state" && request.method === "PUT") return writeState(request, env);
     return assetResponse(url.pathname) || new Response("404 - Archivo no encontrado", { status: 404, headers: { "content-type": "text/plain; charset=utf-8" } });
   },
 };

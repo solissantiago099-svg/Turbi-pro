@@ -32,6 +32,41 @@ const seed = {
 };
 
 const db = storage.load(seed);
+let activeView = "nueva";
+
+async function loadRemoteData() {
+  try {
+    const response = await fetch("/api/state", { headers: { accept: "application/json" } });
+    if (!response.ok) throw new Error(`Estado remoto ${response.status}`);
+    const payload = await response.json();
+    if (!payload.data) {
+      await saveRemoteData("Base inicializada");
+      return;
+    }
+    Object.assign(db, payload.data);
+    storage.save(db);
+    show(activeView);
+    toast("Datos sincronizados con la base");
+  } catch (error) {
+    console.warn("No se pudo sincronizar con la base.", error);
+    toast("Modo local: no se pudo conectar con la base", "error");
+  }
+}
+
+async function saveRemoteData(message) {
+  try {
+    const response = await fetch("/api/state", {
+      method: "PUT",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ data: db }),
+    });
+    if (!response.ok) throw new Error(`Guardado remoto ${response.status}`);
+  } catch (error) {
+    console.warn("No se pudo guardar en la base.", error);
+    toast("Guardado local. La base no respondió.", "error");
+  }
+}
+
 const defaultFrequentAddresses = [
   { name: "Depósito Tamarindo", address: "Tamarindo 1858, Ituzaingó" },
   { name: "Juncal", address: "Juncal 4431, CABA" },
@@ -54,7 +89,7 @@ const viewMeta = {
 };
 
 function persist(message = "Cambios guardados") {
-  if (storage.save(db)) toast(message);
+  if (storage.save(db)) { toast(message); saveRemoteData(message); }
   else toast("No se pudo guardar. Revisá el espacio del navegador.", "error");
 }
 
@@ -68,6 +103,7 @@ function toast(message, type = "ok") {
 }
 
 function show(view, options = {}) {
+  activeView = view;
   closeAgendaTaskModal(); closeVehicleEditor();
   $$("[data-view]").forEach(button => button.classList.toggle("active", button.dataset.view === view));
   $$(".view").forEach(section => section.classList.toggle("active", section.id === view));
@@ -319,3 +355,4 @@ $("#menu-toggle").onclick = () => document.body.classList.toggle("menu-open");
 document.addEventListener("pointerdown", event => { if (!document.body.classList.contains("menu-open")) return; if ($(".sidebar").contains(event.target) || $("#menu-toggle").contains(event.target)) return; document.body.classList.remove("menu-open"); });
 document.addEventListener("keydown", event => { if (event.key === "Escape") closeAgendaTaskModal(); });
 show("nueva");
+loadRemoteData();
