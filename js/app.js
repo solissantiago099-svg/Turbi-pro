@@ -90,6 +90,21 @@ function showApp() {
   $("#login-screen").hidden = true;
 }
 
+function safeShow(view, options = {}) {
+  try {
+    show(view, options);
+  } catch (error) {
+    console.error("No se pudo renderizar la vista.", error);
+    document.body.classList.remove("logged-out", "auth-loading", "menu-open");
+    $("#login-screen").hidden = true;
+    const main = $("main");
+    if (main) {
+      main.innerHTML = `<section class="view active"><div class="empty"><h2>Sesión iniciada</h2><p>Entraste correctamente, pero la agenda no pudo dibujarse en este navegador. Recargá la página o probá desde Chrome.</p></div></section>`;
+    }
+    toast("Entraste, pero hubo un problema al mostrar la agenda.", "error");
+  }
+}
+
 async function login(username, password) {
   const requestId = ++authRequestId;
   sessionToken = "";
@@ -107,8 +122,8 @@ async function login(username, password) {
   currentUser = payload.user;
   showApp();
   activeView = currentUser.role === "chofer" ? "ruta" : "agenda";
-  show(activeView);
   await loadRemoteData();
+  safeShow(activeView);
 }
 
 async function logout() {
@@ -132,8 +147,8 @@ async function restoreSession() {
     currentUser = payload.user;
     showApp();
     activeView = currentUser.role === "chofer" ? "ruta" : "agenda";
-    show(activeView);
     await loadRemoteData();
+    safeShow(activeView);
   } catch {
     if (requestId !== authRequestId) return;
     localStorage.removeItem("tamiz_session");
@@ -540,7 +555,9 @@ $("#login-form").onsubmit = async event => {
   event.preventDefault();
   const form = event.currentTarget;
   const button = $("button", form);
+  const originalText = button.textContent;
   button.disabled = true;
+  button.textContent = "Entrando...";
   try {
     const data = new FormData(form);
     await login(String(data.get("username") || "").trim(), String(data.get("password") || ""));
@@ -549,6 +566,7 @@ $("#login-form").onsubmit = async event => {
     showLogin(error.message || "Usuario o contraseña incorrectos.");
   } finally {
     button.disabled = false;
+    button.textContent = originalText;
   }
 };
 document.addEventListener("pointerdown", event => { if (!document.body.classList.contains("menu-open")) return; if ($(".sidebar").contains(event.target) || $("#menu-toggle").contains(event.target)) return; document.body.classList.remove("menu-open"); });
