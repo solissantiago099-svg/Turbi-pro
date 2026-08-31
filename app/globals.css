@@ -9,6 +9,11 @@
   --amber: #dc8b14;
   --red: #cf3f3f;
   --blue: #2365a9;
+  --cyan: #0f7b86;
+  --paper: #ffffff;
+  --surface: #f8fbfd;
+  --shadow-sm: 0 1px 2px rgba(9, 33, 59, 0.06), 0 8px 20px rgba(9, 33, 59, 0.05);
+  --shadow-md: 0 14px 38px rgba(9, 33, 59, 0.12);
   font-family: Inter, ui-sans-serif, system-ui, -apple-system, "Segoe UI", sans-serif;
   color-scheme: light;
 }
@@ -20,8 +25,10 @@
 body {
   margin: 0;
   min-height: 100vh;
-  background: var(--soft);
+  background:
+    linear-gradient(180deg, #eef4f8 0, #f7fafc 280px, #eef3f6 100%);
   color: var(--ink);
+  font-size: 15px;
 }
 
 button,
@@ -33,6 +40,11 @@ textarea {
 
 button {
   cursor: pointer;
+}
+
+::selection {
+  background: #bcebd0;
+  color: var(--navy);
 }
 
 .loading {
@@ -48,15 +60,18 @@ button {
   display: grid;
   place-items: center;
   padding: 20px;
-  background: linear-gradient(135deg, #06192d, #0d2b48 58%, #08783a);
+  background:
+    linear-gradient(135deg, rgba(6, 25, 45, 0.98), rgba(11, 68, 80, 0.96) 58%, rgba(8, 120, 58, 0.96)),
+    linear-gradient(90deg, transparent 0 23px, rgba(255, 255, 255, 0.05) 24px 25px, transparent 26px 100%);
 }
 
 .loginCard {
   width: min(430px, 100%);
   background: #fff;
-  border-radius: 18px;
-  padding: 28px;
-  box-shadow: 0 24px 80px rgba(0, 0, 0, 0.28);
+  border: 1px solid rgba(255, 255, 255, 0.68);
+  border-radius: 8px;
+  padding: 30px;
+  box-shadow: 0 28px 90px rgba(0, 0, 0, 0.32);
 }
 
 .eyebrow {
@@ -100,10 +115,12 @@ input,
 select,
 textarea {
   width: 100%;
-  border: 1px solid #cbd5df;
-  border-radius: 9px;
-  padding: 12px;
+  border: 1px solid #cfd9e2;
+  border-radius: 8px;
+  padding: 12px 13px;
   background: #fff;
+  color: var(--ink);
+  transition: border-color 0.16s ease, box-shadow 0.16s ease, background 0.16s ease;
 }
 
 input:focus,
@@ -111,6 +128,7 @@ select:focus,
 textarea:focus {
   outline: 3px solid #ccebd9;
   border-color: var(--green);
+  box-shadow: 0 0 0 1px rgba(11, 147, 72, 0.15);
 }
 
 textarea {
@@ -121,21 +139,34 @@ textarea {
 .btn {
   min-height: 42px;
   border: 1px solid var(--line);
-  border-radius: 9px;
+  border-radius: 8px;
   padding: 10px 14px;
-  background: #fff;
+  background: linear-gradient(180deg, #fff, #f8fafc);
   color: var(--ink);
   font-weight: 800;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 7px;
+  box-shadow: 0 1px 2px rgba(9, 33, 59, 0.04);
+  transition: transform 0.14s ease, border-color 0.14s ease, box-shadow 0.14s ease, background 0.14s ease;
+}
+
+.btn:hover {
+  border-color: #b8c7d3;
+  box-shadow: var(--shadow-sm);
+  transform: translateY(-1px);
 }
 
 .btn.primary {
   border-color: var(--green);
-  background: var(--green);
+  background: linear-gradient(180deg, #11a657, var(--green));
   color: #fff;
+  box-shadow: 0 8px 18px rgba(11, 147, 72, 0.22);
 }
 
 .btn.primary:hover {
-  background: var(--green-dark);
+  background: linear-gradient(180deg, #0d994f, var(--green-dark));
 }
 
 .btn.block {
@@ -180,7 +211,7 @@ textarea {
 .shell {
   min-height: 100vh;
   display: grid;
-  grid-template-columns: 238px minmax(0, 1fr);
+  grid-template-columns: 244px minmax(0, 1fr);
 }
 
 .sidebar {
@@ -189,15 +220,21 @@ textarea {
   height: 100vh;
   display: flex;
   flex-direction: column;
-  gap: 22px;
-  padding: 26px 18px;
-  background: linear-gradient(180deg, var(--navy), #071a2e);
+  gap: 24px;
+  padding: 28px 17px;
+  background:
+    linear-gradient(180deg, #061b31 0%, #082640 55%, #062235 100%),
+    linear-gradient(90deg, rgba(255, 255, 255, 0.06), transparent);
   color: #fff;
+  border-right: 1px solid rgba(255, 255, 255, 0.08);
+  box-shadow: 10px 0 30px rgba(8, 33, 59, 0.16);
 }
 
 .brand {
-  font-size: 23px;
+  font-size: 24px;
   font-weight: 900;
+  padding: 14px 12px 12px;
+  color: #fff;
 }
 
 .nav {
@@ -210,17 +247,21 @@ textarea {
   align-items: center;
   gap: 10px;
   border: 0;
-  border-radius: 10px;
-  padding: 12px;
+  border-radius: 8px;
+  padding: 12px 13px;
   background: transparent;
-  color: #fff;
+  color: rgba(255, 255, 255, 0.86);
   text-align: left;
   font-weight: 750;
+  transition: background 0.16s ease, color 0.16s ease, transform 0.16s ease;
 }
 
 .nav button.active,
 .nav button:hover {
-  background: var(--green);
+  background: linear-gradient(180deg, #10a958, #0a9348);
+  color: #fff;
+  box-shadow: 0 10px 22px rgba(4, 18, 32, 0.24);
+  transform: translateX(2px);
 }
 
 .nav button:disabled {
@@ -241,15 +282,16 @@ textarea {
   position: sticky;
   top: 0;
   z-index: 10;
-  min-height: 86px;
+  min-height: 88px;
   display: flex;
   align-items: center;
   justify-content: space-between;
   gap: 16px;
   padding: 18px 28px;
-  background: rgba(255, 255, 255, 0.95);
+  background: rgba(255, 255, 255, 0.86);
   border-bottom: 1px solid var(--line);
   backdrop-filter: blur(10px);
+  box-shadow: 0 10px 28px rgba(9, 33, 59, 0.05);
 }
 
 .topbar h1 {
@@ -271,7 +313,8 @@ textarea {
 .pill {
   border-radius: 999px;
   padding: 8px 11px;
-  background: #e8f7ee;
+  background: #e6f7ec;
+  border: 1px solid #c8ead5;
   color: var(--green-dark);
   font-size: 12px;
   font-weight: 900;
@@ -284,7 +327,7 @@ textarea {
 .panel {
   width: min(1460px, 100%);
   margin: 0 auto;
-  padding: 24px;
+  padding: 26px;
 }
 
 .kpis {
@@ -298,13 +341,13 @@ textarea {
 .task,
 .formCard {
   border: 1px solid var(--line);
-  border-radius: 12px;
-  background: #fff;
-  box-shadow: 0 4px 18px rgba(9, 33, 59, 0.04);
+  border-radius: 8px;
+  background: var(--paper);
+  box-shadow: var(--shadow-sm);
 }
 
 .card {
-  padding: 16px;
+  padding: 17px;
 }
 
 .card strong {
@@ -319,34 +362,44 @@ textarea {
   align-items: center;
   justify-content: space-between;
   gap: 12px;
-  margin-bottom: 14px;
+  margin-bottom: 16px;
 }
 
 .agendaHead h2 {
-  margin: 4px 0 0;
-  font-size: 24px;
+  margin: 5px 0 0;
+  font-size: 26px;
   text-transform: capitalize;
+  color: #071d34;
 }
 
 .week {
   display: grid;
   grid-template-columns: repeat(7, minmax(0, 1fr));
-  gap: 8px;
-  margin-bottom: 14px;
+  gap: 10px;
+  margin-bottom: 16px;
 }
 
 .dayChip {
-  min-height: 68px;
+  min-height: 76px;
   border: 1px solid var(--line);
-  border-radius: 10px;
-  background: #fff;
+  border-radius: 8px;
+  background: rgba(255, 255, 255, 0.9);
   text-align: left;
-  padding: 10px;
+  padding: 12px;
+  box-shadow: 0 1px 2px rgba(9, 33, 59, 0.04);
+  transition: transform 0.14s ease, border-color 0.14s ease, box-shadow 0.14s ease, background 0.14s ease;
+}
+
+.dayChip:hover {
+  border-color: #b9c8d4;
+  box-shadow: var(--shadow-sm);
+  transform: translateY(-1px);
 }
 
 .dayChip.active {
   border-color: var(--green);
-  box-shadow: inset 0 0 0 1px var(--green);
+  background: linear-gradient(180deg, #f2fff7, #fff);
+  box-shadow: inset 0 0 0 1px var(--green), 0 12px 26px rgba(11, 147, 72, 0.13);
 }
 
 .dayChip span,
@@ -363,6 +416,7 @@ textarea {
 .dailySchedule {
   display: grid;
   gap: 0;
+  filter: drop-shadow(0 14px 28px rgba(9, 33, 59, 0.08));
 }
 
 .scheduleSummary {
@@ -373,25 +427,26 @@ textarea {
   align-items: center;
   justify-content: space-between;
   gap: 12px;
-  border: 1px solid var(--line);
-  border-radius: 12px 12px 0 0;
-  padding: 12px 14px;
+  border: 1px solid #d7e1e9;
+  border-radius: 8px 8px 0 0;
+  padding: 13px 15px;
   background: rgba(255, 255, 255, 0.96);
   backdrop-filter: blur(10px);
+  color: #26384c;
 }
 
 .scheduleList {
-  border: 1px solid var(--line);
+  border: 1px solid #d7e1e9;
   border-top: 0;
-  border-radius: 0 0 12px 12px;
+  border-radius: 0 0 8px 8px;
   overflow: hidden;
   background: #fff;
 }
 
 .scheduleRow {
   display: grid;
-  grid-template-columns: 82px minmax(0, 1fr);
-  min-height: 72px;
+  grid-template-columns: 86px minmax(0, 1fr);
+  min-height: 78px;
   border-top: 1px solid var(--line);
 }
 
@@ -404,9 +459,9 @@ textarea {
   place-items: start center;
   border: 0;
   border-right: 1px solid var(--line);
-  padding: 16px 6px;
-  background: #f8fafb;
-  color: var(--blue);
+  padding: 17px 6px;
+  background: #f5f8fa;
+  color: #436078;
   font-weight: 900;
 }
 
@@ -421,13 +476,20 @@ textarea {
 
 .freeSlot {
   width: 100%;
-  min-height: 56px;
-  border: 1px dashed #b9c5cf;
-  border-radius: 10px;
-  background: #f8fafb;
+  min-height: 60px;
+  border: 1px dashed #b8c7d2;
+  border-radius: 8px;
+  background: linear-gradient(180deg, #fbfdfe, #f5f9fb);
   color: var(--muted);
   text-align: left;
-  padding: 10px 12px;
+  padding: 11px 13px;
+  transition: border-color 0.14s ease, background 0.14s ease, transform 0.14s ease;
+}
+
+.freeSlot:not(:disabled):hover {
+  border-color: var(--green);
+  background: #f2fff7;
+  transform: translateY(-1px);
 }
 
 .freeSlot span,
@@ -441,11 +503,12 @@ textarea {
 }
 
 .dailyTask {
-  border: 1px solid var(--line);
-  border-left: 4px solid var(--blue);
-  border-radius: 10px;
+  border: 1px solid #d9e3eb;
+  border-left: 4px solid var(--cyan);
+  border-radius: 8px;
   background: #fff;
   overflow: hidden;
+  box-shadow: 0 6px 18px rgba(9, 33, 59, 0.06);
 }
 
 .dailyTask + .dailyTask {
@@ -453,7 +516,7 @@ textarea {
 }
 
 .dailyTask[open] {
-  box-shadow: 0 10px 24px rgba(9, 33, 59, 0.08);
+  box-shadow: var(--shadow-md);
 }
 
 .dailyTask summary {
@@ -461,7 +524,7 @@ textarea {
   grid-template-columns: 58px minmax(0, 1fr) auto;
   gap: 12px;
   align-items: center;
-  padding: 12px;
+  padding: 13px;
   list-style: none;
 }
 
@@ -470,7 +533,7 @@ textarea {
 }
 
 .dailyTaskTime {
-  color: var(--blue);
+  color: var(--cyan);
   font-weight: 900;
 }
 
@@ -493,7 +556,8 @@ textarea {
 
 .dailyTaskDetail {
   border-top: 1px solid var(--line);
-  padding: 12px;
+  padding: 14px;
+  background: #fbfdfe;
 }
 
 .dailyTaskDetail p {
@@ -508,9 +572,10 @@ textarea {
 }
 
 .dailyMeta span {
-  border-radius: 9px;
-  padding: 9px;
-  background: #f8fafb;
+  border: 1px solid #e3ebf1;
+  border-radius: 8px;
+  padding: 10px;
+  background: #fff;
   color: var(--ink);
 }
 
@@ -538,7 +603,7 @@ textarea {
   grid-template-columns: 78px minmax(0, 1fr) auto;
   gap: 12px;
   align-items: start;
-  padding: 14px;
+  padding: 15px;
 }
 
 .taskTime {
@@ -562,10 +627,11 @@ textarea {
   width: max-content;
   border-radius: 999px;
   padding: 5px 9px;
-  background: #eaf2fb;
-  color: var(--blue);
+  background: #e9f5f7;
+  color: var(--cyan);
   font-size: 12px;
   font-weight: 900;
+  border: 1px solid #cde5e9;
 }
 
 .status.en-trabajo {
@@ -580,7 +646,7 @@ textarea {
 
 .empty {
   border: 1px dashed #b9c5cf;
-  border-radius: 12px;
+  border-radius: 8px;
   padding: 34px;
   background: #fff;
   text-align: center;
@@ -590,7 +656,7 @@ textarea {
 .grid {
   display: grid;
   grid-template-columns: repeat(2, minmax(0, 1fr));
-  gap: 14px;
+  gap: 16px;
 }
 
 .formCard {
@@ -600,7 +666,7 @@ textarea {
 .formLayout {
   display: grid;
   grid-template-columns: minmax(0, 1.45fr) 360px;
-  gap: 18px;
+  gap: 20px;
 }
 
 .taskForm {
@@ -608,11 +674,12 @@ textarea {
 }
 
 .accordion {
-  border: 1px solid var(--line);
-  border-radius: 12px;
+  border: 1px solid #d7e1e9;
+  border-radius: 8px;
   background: #fff;
   overflow: hidden;
-  margin-bottom: 12px;
+  margin-bottom: 13px;
+  box-shadow: var(--shadow-sm);
 }
 
 .accordion > summary {
@@ -620,20 +687,22 @@ textarea {
   display: flex;
   align-items: center;
   justify-content: space-between;
-  padding: 16px;
+  padding: 16px 17px;
   font-weight: 900;
   cursor: pointer;
+  color: #071d34;
 }
 
 .accordionBody {
   border-top: 1px solid var(--line);
-  padding: 0 16px 16px;
+  padding: 2px 17px 17px;
+  background: #fbfdfe;
 }
 
 .routeNotice {
   margin-top: 12px;
   border: 1px solid #efd098;
-  border-radius: 9px;
+  border-radius: 8px;
   padding: 11px;
   background: #fff5df;
   color: #8a5b0b;
@@ -652,7 +721,7 @@ textarea {
   justify-content: space-between;
   gap: 12px;
   border: 1px dashed #b9c5cf;
-  border-radius: 10px;
+  border-radius: 8px;
   padding: 12px;
   background: #f8fafb;
   cursor: pointer;
@@ -685,6 +754,7 @@ textarea {
   color: var(--muted);
   font-size: 12px;
   font-weight: 800;
+  box-shadow: 0 1px 2px rgba(9, 33, 59, 0.04);
 }
 
 .summaryCard {
@@ -692,10 +762,10 @@ textarea {
   top: 105px;
   align-self: start;
   border: 1px solid var(--line);
-  border-radius: 12px;
+  border-radius: 8px;
   padding: 18px;
-  background: #fff;
-  box-shadow: 0 4px 18px rgba(9, 33, 59, 0.04);
+  background: linear-gradient(180deg, #ffffff, #f8fbfd);
+  box-shadow: var(--shadow-sm);
 }
 
 .summaryCard p {
@@ -724,11 +794,12 @@ textarea {
   align-items: center;
   justify-content: space-between;
   gap: 12px;
-  padding: 14px;
+  padding: 16px;
 }
 
 .record h3 {
   margin: 0 0 4px;
+  color: #071d34;
 }
 
 .record p {
@@ -750,6 +821,7 @@ textarea {
 
 .editorForm {
   margin-bottom: 14px;
+  box-shadow: var(--shadow-md);
 }
 
 .formTitle {
@@ -769,7 +841,7 @@ textarea {
   gap: 8px;
   margin-top: 12px;
   border: 1px solid var(--line);
-  border-radius: 10px;
+  border-radius: 8px;
   padding: 10px;
   background: #f8fafb;
   color: var(--muted);
@@ -779,7 +851,7 @@ textarea {
   display: grid;
   gap: 8px;
   border: 1px solid var(--line);
-  border-radius: 10px;
+  border-radius: 8px;
   padding: 12px;
   background: #f8fafb;
 }
@@ -819,7 +891,7 @@ textarea {
 
 .vehicleDoc {
   border: 1px solid var(--line);
-  border-radius: 10px;
+  border-radius: 8px;
   padding: 12px;
   background: #f8fafb;
 }
@@ -877,11 +949,12 @@ textarea {
   transform: translateY(70px);
   opacity: 0;
   transition: 0.22s;
-  border-radius: 10px;
+  border-radius: 8px;
   padding: 13px 16px;
-  background: var(--navy);
+  background: #071d34;
   color: #fff;
   font-weight: 800;
+  box-shadow: var(--shadow-md);
 }
 
 .toast.show {
@@ -901,7 +974,7 @@ textarea {
   }
 
   .loginCard {
-    border-radius: 16px;
+    border-radius: 8px;
     padding: 24px 18px;
   }
 
@@ -920,6 +993,7 @@ textarea {
     width: min(84vw, 310px);
     transform: translateX(-100%);
     transition: 0.22s ease;
+    box-shadow: 18px 0 44px rgba(0, 0, 0, 0.28);
   }
 
   .shell.menuOpen .sidebar {
@@ -942,8 +1016,8 @@ textarea {
   }
 
   .topbar {
-    min-height: 74px;
-    padding: 12px;
+    min-height: 72px;
+    padding: 11px 12px;
   }
 
   .topbar h1 {
@@ -956,7 +1030,7 @@ textarea {
   }
 
   .panel {
-    padding: 12px;
+    padding: 14px 12px;
   }
 
   .kpis,
@@ -973,7 +1047,8 @@ textarea {
   }
 
   .dayChip {
-    flex: 0 0 62px;
+    flex: 0 0 74px;
+    min-height: 72px;
   }
 
   .agendaHead {
@@ -986,7 +1061,7 @@ textarea {
   }
 
   .scheduleRow {
-    grid-template-columns: 62px minmax(0, 1fr);
+    grid-template-columns: 64px minmax(0, 1fr);
     min-height: 68px;
   }
 
@@ -1003,6 +1078,10 @@ textarea {
     grid-template-columns: 48px minmax(0, 1fr);
     gap: 7px;
     padding: 10px 9px;
+  }
+
+  .dailyTaskMain small {
+    white-space: normal;
   }
 
   .dailyTask summary .status {
@@ -1049,6 +1128,7 @@ textarea {
     padding: 10px 18px calc(10px + env(safe-area-inset-bottom));
     background: rgba(255, 255, 255, 0.96);
     border-top: 1px solid var(--line);
+    backdrop-filter: blur(10px);
   }
 
   .actions .btn {
