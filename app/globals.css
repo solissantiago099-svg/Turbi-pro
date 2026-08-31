@@ -360,6 +360,179 @@ textarea {
   gap: 10px;
 }
 
+.dailySchedule {
+  display: grid;
+  gap: 0;
+}
+
+.scheduleSummary {
+  position: sticky;
+  top: 86px;
+  z-index: 6;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  border: 1px solid var(--line);
+  border-radius: 12px 12px 0 0;
+  padding: 12px 14px;
+  background: rgba(255, 255, 255, 0.96);
+  backdrop-filter: blur(10px);
+}
+
+.scheduleList {
+  border: 1px solid var(--line);
+  border-top: 0;
+  border-radius: 0 0 12px 12px;
+  overflow: hidden;
+  background: #fff;
+}
+
+.scheduleRow {
+  display: grid;
+  grid-template-columns: 82px minmax(0, 1fr);
+  min-height: 72px;
+  border-top: 1px solid var(--line);
+}
+
+.scheduleRow:first-child {
+  border-top: 0;
+}
+
+.scheduleTime {
+  display: grid;
+  place-items: start center;
+  border: 0;
+  border-right: 1px solid var(--line);
+  padding: 16px 6px;
+  background: #f8fafb;
+  color: var(--blue);
+  font-weight: 900;
+}
+
+.scheduleRow.free .scheduleTime {
+  color: var(--muted);
+}
+
+.scheduleContent {
+  min-width: 0;
+  padding: 8px;
+}
+
+.freeSlot {
+  width: 100%;
+  min-height: 56px;
+  border: 1px dashed #b9c5cf;
+  border-radius: 10px;
+  background: #f8fafb;
+  color: var(--muted);
+  text-align: left;
+  padding: 10px 12px;
+}
+
+.freeSlot span,
+.freeSlot small {
+  display: block;
+}
+
+.freeSlot span {
+  color: var(--ink);
+  font-weight: 900;
+}
+
+.dailyTask {
+  border: 1px solid var(--line);
+  border-left: 4px solid var(--blue);
+  border-radius: 10px;
+  background: #fff;
+  overflow: hidden;
+}
+
+.dailyTask + .dailyTask {
+  margin-top: 8px;
+}
+
+.dailyTask[open] {
+  box-shadow: 0 10px 24px rgba(9, 33, 59, 0.08);
+}
+
+.dailyTask summary {
+  display: grid;
+  grid-template-columns: 58px minmax(0, 1fr) auto;
+  gap: 12px;
+  align-items: center;
+  padding: 12px;
+  list-style: none;
+}
+
+.dailyTask summary::-webkit-details-marker {
+  display: none;
+}
+
+.dailyTaskTime {
+  color: var(--blue);
+  font-weight: 900;
+}
+
+.dailyTaskMain {
+  min-width: 0;
+}
+
+.dailyTaskMain b,
+.dailyTaskMain small {
+  display: block;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.dailyTaskMain small {
+  margin-top: 3px;
+  color: var(--muted);
+}
+
+.dailyTaskDetail {
+  border-top: 1px solid var(--line);
+  padding: 12px;
+}
+
+.dailyTaskDetail p {
+  margin: 0 0 10px;
+  color: var(--muted);
+}
+
+.dailyMeta {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 10px;
+}
+
+.dailyMeta span {
+  border-radius: 9px;
+  padding: 9px;
+  background: #f8fafb;
+  color: var(--ink);
+}
+
+.dailyMeta b {
+  display: block;
+  margin-bottom: 3px;
+  color: var(--muted);
+  font-size: 11px;
+  text-transform: uppercase;
+}
+
+.inlineActions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-top: 12px;
+}
+
+.inlineActions a {
+  text-decoration: none;
+}
+
 .task {
   display: grid;
   grid-template-columns: 78px minmax(0, 1fr) auto;
@@ -422,6 +595,115 @@ textarea {
 
 .formCard {
   padding: 18px;
+}
+
+.formLayout {
+  display: grid;
+  grid-template-columns: minmax(0, 1.45fr) 360px;
+  gap: 18px;
+}
+
+.taskForm {
+  min-width: 0;
+}
+
+.accordion {
+  border: 1px solid var(--line);
+  border-radius: 12px;
+  background: #fff;
+  overflow: hidden;
+  margin-bottom: 12px;
+}
+
+.accordion > summary {
+  min-height: 58px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 16px;
+  font-weight: 900;
+  cursor: pointer;
+}
+
+.accordionBody {
+  border-top: 1px solid var(--line);
+  padding: 0 16px 16px;
+}
+
+.routeNotice {
+  margin-top: 12px;
+  border: 1px solid #efd098;
+  border-radius: 9px;
+  padding: 11px;
+  background: #fff5df;
+  color: #8a5b0b;
+}
+
+.routeNotice.success {
+  border-color: #b8e0c6;
+  background: #eaf8ef;
+  color: var(--green-dark);
+}
+
+.pdfUpload {
+  min-height: 62px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  border: 1px dashed #b9c5cf;
+  border-radius: 10px;
+  padding: 12px;
+  background: #f8fafb;
+  cursor: pointer;
+}
+
+.pdfUpload input {
+  display: none;
+}
+
+.pdfUpload span {
+  font-weight: 900;
+}
+
+.pdfUpload small {
+  color: var(--muted);
+}
+
+.quickAddresses {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 7px;
+  margin-top: 8px;
+}
+
+.quickAddress {
+  border: 1px solid var(--line);
+  border-radius: 999px;
+  padding: 7px 10px;
+  background: #fff;
+  color: var(--muted);
+  font-size: 12px;
+  font-weight: 800;
+}
+
+.summaryCard {
+  position: sticky;
+  top: 105px;
+  align-self: start;
+  border: 1px solid var(--line);
+  border-radius: 12px;
+  padding: 18px;
+  background: #fff;
+  box-shadow: 0 4px 18px rgba(9, 33, 59, 0.04);
+}
+
+.summaryCard p {
+  color: var(--muted);
+}
+
+.summaryCard b {
+  color: var(--ink);
 }
 
 .row {
@@ -563,6 +845,60 @@ textarea {
 
   .agendaHead {
     align-items: flex-start;
+  }
+
+  .scheduleSummary {
+    top: 74px;
+    padding: 10px 12px;
+  }
+
+  .scheduleRow {
+    grid-template-columns: 62px minmax(0, 1fr);
+    min-height: 68px;
+  }
+
+  .scheduleTime {
+    padding: 13px 5px;
+    font-size: 13px;
+  }
+
+  .scheduleContent {
+    padding: 7px;
+  }
+
+  .dailyTask summary {
+    grid-template-columns: 48px minmax(0, 1fr);
+    gap: 7px;
+    padding: 10px 9px;
+  }
+
+  .dailyTask summary .status {
+    grid-column: 2;
+  }
+
+  .dailyMeta,
+  .formLayout {
+    grid-template-columns: 1fr;
+  }
+
+  .summaryCard {
+    position: static;
+    order: -1;
+  }
+
+  .formLayout {
+    display: flex;
+    flex-direction: column;
+  }
+
+  .quickAddresses {
+    flex-wrap: nowrap;
+    overflow-x: auto;
+  }
+
+  .quickAddress {
+    flex: 0 0 auto;
+    max-width: 170px;
   }
 
   .task {
