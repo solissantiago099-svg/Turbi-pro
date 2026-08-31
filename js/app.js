@@ -106,7 +106,7 @@ function safeShow(view, options = {}) {
 }
 
 async function login(username, password) {
-  const requestId = ++authRequestId;
+  ++authRequestId;
   sessionToken = "";
   localStorage.removeItem("tamiz_session");
   const response = await fetch("/api/login", {
@@ -115,7 +115,6 @@ async function login(username, password) {
     body: JSON.stringify({ username, password }),
   });
   const payload = await response.json().catch(() => ({}));
-  if (requestId !== authRequestId) return;
   if (!response.ok) throw new Error(payload.error || "No se pudo iniciar sesión");
   sessionToken = payload.token;
   localStorage.setItem("tamiz_session", sessionToken);
@@ -124,6 +123,7 @@ async function login(username, password) {
   activeView = currentUser.role === "chofer" ? "ruta" : "agenda";
   await loadRemoteData();
   safeShow(activeView);
+  if (!$("#login-screen").hidden) throw new Error("La sesión inició, pero la pantalla no cambió. Recargá y volvé a intentar.");
 }
 
 async function logout() {
@@ -563,7 +563,12 @@ $("#login-form").onsubmit = async event => {
     await login(String(data.get("username") || "").trim(), String(data.get("password") || ""));
     form.reset();
   } catch (error) {
-    showLogin(error.message || "Usuario o contraseña incorrectos.");
+    if (sessionToken && currentUser) {
+      showApp();
+      safeShow(activeView || "agenda");
+    } else {
+      showLogin(error.message || "Usuario o contraseña incorrectos.");
+    }
   } finally {
     button.disabled = false;
     button.textContent = originalText;
