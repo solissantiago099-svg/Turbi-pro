@@ -586,7 +586,7 @@ function DailyTask({ task, db, canOperate, onStatus, outside = false }) {
   );
 }
 
-function Accordion({ title, children, defaultOpen = true }) {
+function Accordion({ title, children, defaultOpen = false }) {
   return (
     <details className="accordion" open={defaultOpen}>
       <summary>{title}</summary>
