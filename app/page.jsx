@@ -1243,8 +1243,8 @@ function UserForm({ user, onCancel, onSave }) {
 
   async function submit(event) {
     event.preventDefault();
-    if (!isEditing && form.password.length < 6) {
-      alert("La contrasena inicial debe tener al menos 6 caracteres.");
+    if (!isEditing && form.password.length < 4) {
+      alert("La contrasena inicial debe tener al menos 4 digitos.");
       return;
     }
     await onSave({

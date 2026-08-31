@@ -230,7 +230,7 @@ async function createUser(request, env) {
   const name = String(payload?.name || "").trim();
   const password = String(payload?.password || "");
   const role = validRole(payload?.role) ? payload.role : "usuario";
-  if (!username || !name || password.length < 6) return Response.json({ error: "Usuario invalido" }, { status: 400 });
+  if (!username || !name || password.length < 4) return Response.json({ error: "Usuario invalido" }, { status: 400 });
   const exists = await env.DB.prepare("SELECT id FROM app_users WHERE lower(username) = ?").bind(username).first();
   if (exists) return Response.json({ error: "Ese usuario ya existe" }, { status: 409 });
   const id = crypto.randomUUID();
@@ -255,7 +255,7 @@ async function updateUser(request, env) {
   const password = String(payload.password || "");
   if (!name) return Response.json({ error: "Nombre requerido" }, { status: 400 });
   if (password) {
-    if (password.length < 6) return Response.json({ error: "La contrasena debe tener al menos 6 caracteres" }, { status: 400 });
+    if (password.length < 4) return Response.json({ error: "La contrasena debe tener al menos 4 digitos" }, { status: 400 });
     const hash = await sha256("tamiz-rutas:" + password);
     await env.DB.prepare("UPDATE app_users SET name = ?, role = ?, current_driver_id = ?, password_hash = ? WHERE id = ?").bind(name, payload.role, null, hash, payload.id).run();
   } else {
