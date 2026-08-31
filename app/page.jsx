@@ -472,7 +472,6 @@ export default function Home() {
             );
           })}
         </nav>
-        <div className="sidebarFoot">Base compartida activa</div>
       </aside>
 
       <section className="content">
