@@ -794,6 +794,68 @@ textarea {
   white-space: nowrap;
 }
 
+.sectionTitle {
+  margin: 18px 0 8px;
+  font-size: 16px;
+}
+
+.vehicleDocs {
+  display: grid;
+  gap: 10px;
+}
+
+.vehicleDoc {
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  padding: 12px;
+  background: #f8fafb;
+}
+
+.docActions {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 10px;
+  margin-top: 10px;
+}
+
+.docActions a,
+.linkUpload {
+  border: 0;
+  background: transparent;
+  color: var(--green-dark);
+  font-size: 12px;
+  font-weight: 900;
+  text-decoration: none;
+  cursor: pointer;
+}
+
+.linkUpload input {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  opacity: 0;
+  pointer-events: none;
+}
+
+.docExpiry {
+  margin-left: auto;
+  color: var(--green-dark);
+  font-size: 12px;
+  font-weight: 900;
+}
+
+.docExpiry.expired {
+  color: var(--red);
+}
+
+.maintenanceRow {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 140px auto;
+  gap: 8px;
+  align-items: center;
+}
+
 .toast {
   position: fixed;
   right: 18px;
@@ -994,5 +1056,13 @@ textarea {
   .documentItem {
     align-items: stretch;
     flex-direction: column;
+  }
+
+  .docExpiry {
+    margin-left: 0;
+  }
+
+  .maintenanceRow {
+    grid-template-columns: 1fr;
   }
 }

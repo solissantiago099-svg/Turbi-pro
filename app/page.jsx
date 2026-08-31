@@ -6,11 +6,11 @@ import { CalendarDays, ClipboardList, Edit3, LogOut, Menu, Plus, Route, Settings
 const views = [
   { id: "agenda", label: "Agenda", subtitle: "Planificacion diaria", icon: CalendarDays },
   { id: "ruta", label: "Mi ruta", subtitle: "Trabajo del chofer", icon: Route },
-  { id: "nueva", label: "Nueva tarea", subtitle: "Carga rapida", icon: Plus, supervisor: true },
-  { id: "supervision", label: "Supervision", subtitle: "Estado operativo", icon: ClipboardList, supervisor: true },
-  { id: "vehiculos", label: "Vehiculos", subtitle: "Flota y documentacion", icon: Truck, supervisor: true },
-  { id: "choferes", label: "Choferes", subtitle: "Equipo activo", icon: Users, supervisor: true },
-  { id: "configuracion", label: "Configuracion", subtitle: "Usuarios y respaldo", icon: Settings, supervisor: true },
+  { id: "nueva", label: "Nueva tarea", subtitle: "Carga rapida", icon: Plus, roles: ["admin", "usuario"] },
+  { id: "supervision", label: "Supervision", subtitle: "Estado operativo", icon: ClipboardList, roles: ["admin", "usuario"] },
+  { id: "vehiculos", label: "Vehiculos", subtitle: "Flota y documentacion", icon: Truck, roles: ["admin"] },
+  { id: "choferes", label: "Choferes", subtitle: "Equipo activo", icon: Users, roles: ["admin"] },
+  { id: "configuracion", label: "Configuracion", subtitle: "Usuarios y respaldo", icon: Settings, roles: ["admin"] },
 ];
 
 function localISO(date = new Date()) {
@@ -33,6 +33,27 @@ function minutesFromTime(value) {
 function daysUntil(iso) {
   if (!iso) return 999;
   return Math.ceil((new Date(`${iso}T12:00:00`) - new Date()) / 86400000);
+}
+
+function normalizedRole(role) {
+  return role === "supervisor" ? "admin" : role || "chofer";
+}
+
+function roleLabel(role) {
+  return { admin: "Admin", usuario: "Usuario", chofer: "Chofer", supervisor: "Admin" }[role] || "Chofer";
+}
+
+function canAccessView(role, view) {
+  const normalized = normalizedRole(role);
+  return !view.roles || view.roles.includes(normalized);
+}
+
+function defaultVehicleDocs() {
+  return [
+    { id: "cedula-verde", name: "Cedula verde", expiry: addDays(240) },
+    { id: "rto", name: "RTO", expiry: addDays(18) },
+    { id: "seguro-poliza", name: "Seguro / poliza", expiry: addDays(90) },
+  ];
 }
 
 function fileToDataURL(file) {
@@ -82,7 +103,20 @@ const seed = {
     },
   ],
   drivers: [{ id: 1, name: "Juan Perez", phone: "11 5555-5555", license: "B2", licenseExpiry: addDays(55), status: "disponible" }],
-  vehicles: [{ id: 1, name: "Camioneta 01", brand: "IVECO", model: "Daily", plate: "AE 123 CD", km: 58000, status: "disponible", fuel: "Diesel", health: 94 }],
+  vehicles: [{
+    id: 1,
+    name: "Camioneta 01",
+    brand: "IVECO",
+    model: "Daily",
+    plate: "AE 123 CD",
+    km: 58000,
+    status: "disponible",
+    fuel: "Diesel",
+    health: 94,
+    docs: defaultVehicleDocs(),
+    maintenance: [{ year: 2026, km: 58000, title: "Cambio de aceite" }],
+    plan: [{ title: "Cambio de aceite", nextKm: 68000 }, { title: "Service general", nextKm: 70000 }],
+  }],
   settings: { currentDriverId: 1 },
 };
 
@@ -141,7 +175,9 @@ export default function Home() {
   const [editingTask, setEditingTask] = useState(null);
 
   const currentView = views.find((item) => item.id === view) || views[0];
-  const isSupervisor = user?.role === "supervisor";
+  const currentRole = normalizedRole(user?.role);
+  const isAdmin = currentRole === "admin";
+  const canManageTasks = ["admin", "usuario"].includes(currentRole);
   const driverId = user?.currentDriverId || db.settings?.currentDriverId || 1;
 
   const dayTasks = useMemo(
@@ -225,7 +261,7 @@ export default function Home() {
         const payload = await response.json();
         setUser(payload.user);
         if (Array.isArray(payload.users)) setUsers(payload.users);
-        setView(payload.user.role === "chofer" ? "ruta" : "agenda");
+        setView(normalizedRole(payload.user.role) === "chofer" ? "ruta" : "agenda");
         await loadState(saved, true);
       })
       .catch(() => {
@@ -262,7 +298,7 @@ export default function Home() {
       setToken(payload.token);
       setUser(payload.user);
       if (Array.isArray(payload.users)) setUsers(payload.users);
-      setView(payload.user.role === "chofer" ? "ruta" : "agenda");
+      setView(normalizedRole(payload.user.role) === "chofer" ? "ruta" : "agenda");
       await loadState(payload.token, true);
     } catch (error) {
       setLoginError(error.message || "No se pudo iniciar sesion");
@@ -341,6 +377,15 @@ export default function Home() {
     await saveState(token, nextDb, revision, exists ? "Chofer actualizado" : "Chofer creado");
   }
 
+  async function saveVehicle(nextVehicle) {
+    const exists = db.vehicles.some((vehicle) => Number(vehicle.id) === Number(nextVehicle.id));
+    const nextDb = {
+      ...db,
+      vehicles: exists ? db.vehicles.map((vehicle) => (Number(vehicle.id) === Number(nextVehicle.id) ? nextVehicle : vehicle)) : [...db.vehicles, nextVehicle],
+    };
+    await saveState(token, nextDb, revision, exists ? "Camioneta actualizada" : "Camioneta creada");
+  }
+
   if (loading) return <div className="loading">Cargando TAMIZ RUTAS...</div>;
 
   if (!user) {
@@ -374,7 +419,7 @@ export default function Home() {
         <nav className="nav" aria-label="Navegacion principal">
           {views.map((item) => {
             const Icon = item.icon;
-            const disabled = item.supervisor && !isSupervisor;
+            const disabled = !canAccessView(user?.role, item);
             return (
               <button
                 key={item.id}
@@ -403,7 +448,7 @@ export default function Home() {
             <p>{currentView.subtitle}</p>
           </div>
           <div className="topActions">
-            <span className="pill">{user.role === "chofer" ? "Chofer" : "Supervisor"} - {user.name || user.username}</span>
+            <span className="pill">{roleLabel(user.role)} - {user.name || user.username}</span>
             <button className="btn" onClick={logout}>
               <LogOut size={16} /> Salir
             </button>
@@ -418,7 +463,7 @@ export default function Home() {
                   <span className="eyebrow">AGENDA DIARIA</span>
                   <h2>{new Date(`${selectedDate}T12:00:00`).toLocaleDateString("es-AR", { weekday: "long", day: "numeric", month: "long" })}</h2>
                 </div>
-                {isSupervisor ? <button className="btn primary" onClick={() => { setEditingTask(null); setTaskPrefill({ date: selectedDate, time: "" }); setView("nueva"); }}>Agregar tarea</button> : null}
+                {canManageTasks ? <button className="btn primary" onClick={() => { setEditingTask(null); setTaskPrefill({ date: selectedDate, time: "" }); setView("nueva"); }}>Agregar tarea</button> : null}
               </div>
               <div className="week">
                 {week.map((day) => (
@@ -433,7 +478,7 @@ export default function Home() {
                 date={selectedDate}
                 tasks={dayTasks}
                 db={db}
-                canCreate={isSupervisor}
+                canCreate={canManageTasks}
                 onFreeSlot={(time) => {
                   setEditingTask(null);
                   setTaskPrefill({ date: selectedDate, time });
@@ -474,7 +519,7 @@ export default function Home() {
           )}
 
           {view === "supervision" && <Supervision db={db} />}
-          {view === "vehiculos" && <Records items={db.vehicles} type="vehicle" />}
+          {view === "vehiculos" && <Records items={db.vehicles} type="vehicle" onSave={saveVehicle} />}
           {view === "choferes" && <Records items={db.drivers} type="driver" onSave={saveDriver} />}
           {view === "configuracion" && <SettingsPanel user={user} users={users} db={db} token={token} revision={revision} onUsers={setUsers} onUser={setUser} onNotify={notify} />}
         </div>
@@ -859,16 +904,17 @@ function Supervision({ db }) {
 function Records({ items, type, onSave }) {
   const [editing, setEditing] = useState(null);
   const isDriver = type === "driver";
+  const isVehicle = type === "vehicle";
   return (
     <>
-      {isDriver ? (
+      {isDriver || isVehicle ? (
         <div className="toolbar">
           <div>
-            <span className="eyebrow">CHOFERES</span>
-            <h2>Equipo y documentacion</h2>
+            <span className="eyebrow">{isDriver ? "CHOFERES" : "VEHICULOS"}</span>
+            <h2>{isDriver ? "Equipo y documentacion" : "Camionetas y documentacion"}</h2>
           </div>
-          <button className="btn primary" onClick={() => setEditing({ id: Date.now(), status: "disponible", docs: [] })}>
-            <UserPlus size={16} /> Nuevo chofer
+          <button className="btn primary" onClick={() => setEditing(isDriver ? { id: Date.now(), status: "disponible", docs: [] } : { id: Date.now(), status: "disponible", docs: defaultVehicleDocs(), maintenance: [], plan: [] })}>
+            <UserPlus size={16} /> {isDriver ? "Nuevo chofer" : "Nueva camioneta"}
           </button>
         </div>
       ) : null}
@@ -882,6 +928,16 @@ function Records({ items, type, onSave }) {
           }}
         />
       ) : null}
+      {editing && isVehicle ? (
+        <VehicleForm
+          vehicle={editing}
+          onCancel={() => setEditing(null)}
+          onSave={async (vehicle) => {
+            await onSave(vehicle);
+            setEditing(null);
+          }}
+        />
+      ) : null}
       <section className="grid">
         {items.map((item) => (
           <article className="card record" key={item.id}>
@@ -889,15 +945,148 @@ function Records({ items, type, onSave }) {
               <h3>{item.name}</h3>
               <p>{type === "vehicle" ? `${item.brand || ""} ${item.model || ""} - ${item.plate || ""}` : `${item.phone || ""} - Registro ${item.license || ""}`}</p>
               {isDriver && item.docs?.length ? <small>{item.docs.length} documentos adjuntos</small> : null}
+              {isVehicle ? <small>{(item.docs?.length || defaultVehicleDocs().length)} documentos legales</small> : null}
             </div>
             <div className="recordActions">
               <span className="status">{item.status || "activo"}</span>
               {isDriver ? <button className="btn" onClick={() => setEditing(item)}><Edit3 size={15} /> Editar</button> : null}
+              {isVehicle ? <button className="btn" onClick={() => setEditing(item)}><Edit3 size={15} /> Editar</button> : null}
             </div>
           </article>
         ))}
       </section>
     </>
+  );
+}
+
+function VehicleForm({ vehicle, onCancel, onSave }) {
+  const [form, setForm] = useState({
+    name: vehicle.name || "",
+    brand: vehicle.brand || "",
+    model: vehicle.model || "",
+    plate: vehicle.plate || "",
+    km: vehicle.km || "",
+    fuel: vehicle.fuel || "Diesel",
+    health: vehicle.health || 100,
+    status: vehicle.status || "disponible",
+    docs: vehicle.docs?.length ? vehicle.docs : defaultVehicleDocs(),
+    maintenance: vehicle.maintenance || [],
+    plan: vehicle.plan || [],
+  });
+
+  function update(name, value) {
+    setForm((current) => ({ ...current, [name]: value }));
+  }
+
+  function updateDoc(index, patch) {
+    update("docs", form.docs.map((doc, itemIndex) => (itemIndex === index ? { ...doc, ...patch } : doc)));
+  }
+
+  async function addDocFile(index, file) {
+    if (!file) return;
+    if (file.type !== "application/pdf") {
+      alert("La documentacion de camioneta debe ser PDF.");
+      return;
+    }
+    if (file.size > 1500000) {
+      alert("El PDF supera el maximo de 1,5 MB.");
+      return;
+    }
+    const data = await fileToDataURL(file);
+    updateDoc(index, { file: { name: file.name, size: file.size, data, uploadedAt: new Date().toISOString() } });
+  }
+
+  function updateMaintenance(index, patch) {
+    update("maintenance", form.maintenance.map((item, itemIndex) => (itemIndex === index ? { ...item, ...patch } : item)));
+  }
+
+  function updatePlan(index, patch) {
+    update("plan", form.plan.map((item, itemIndex) => (itemIndex === index ? { ...item, ...patch } : item)));
+  }
+
+  async function submit(event) {
+    event.preventDefault();
+    await onSave({
+      ...vehicle,
+      ...form,
+      km: Number(form.km || 0),
+      health: Number(form.health || 0),
+      maintenance: form.maintenance.map((item) => ({ ...item, km: Number(item.km || 0), year: Number(item.year || new Date().getFullYear()) })),
+      plan: form.plan.map((item) => ({ ...item, nextKm: Number(item.nextKm || 0) })),
+      updatedAt: new Date().toISOString(),
+    });
+  }
+
+  return (
+    <form className="card editorForm" onSubmit={submit}>
+      <div className="formTitle">
+        <div>
+          <span className="eyebrow">CAMIONETA</span>
+          <h2>{vehicle.name ? "Editar camioneta" : "Nueva camioneta"}</h2>
+        </div>
+      </div>
+      <div className="row">
+        <div><label>Nombre interno</label><input value={form.name} onChange={(event) => update("name", event.target.value)} required /></div>
+        <div><label>Patente</label><input value={form.plate} onChange={(event) => update("plate", event.target.value.toUpperCase())} required /></div>
+      </div>
+      <div className="row">
+        <div><label>Marca</label><input value={form.brand} onChange={(event) => update("brand", event.target.value)} /></div>
+        <div><label>Modelo</label><input value={form.model} onChange={(event) => update("model", event.target.value)} /></div>
+      </div>
+      <div className="row">
+        <div><label>Kilometraje</label><input type="number" min="0" value={form.km} onChange={(event) => update("km", event.target.value)} /></div>
+        <div><label>Combustible</label><input value={form.fuel} onChange={(event) => update("fuel", event.target.value)} /></div>
+      </div>
+      <div className="row">
+        <div><label>Salud (%)</label><input type="number" min="0" max="100" value={form.health} onChange={(event) => update("health", event.target.value)} /></div>
+        <div><label>Estado</label><select value={form.status} onChange={(event) => update("status", event.target.value)}><option value="disponible">Disponible</option><option value="en-taller">En taller</option><option value="fuera-de-servicio">Fuera de servicio</option></select></div>
+      </div>
+      <h3 className="sectionTitle">Documentacion legal</h3>
+      <div className="vehicleDocs">
+        {form.docs.map((doc, index) => (
+          <article className="vehicleDoc" key={doc.id || doc.name}>
+            <div className="row">
+              <div><label>Documento</label><input value={doc.name} onChange={(event) => updateDoc(index, { name: event.target.value })} /></div>
+              <div><label>Vencimiento</label><input type="date" value={doc.expiry || ""} onChange={(event) => updateDoc(index, { expiry: event.target.value })} /></div>
+            </div>
+            <div className="docActions">
+              <label className="linkUpload">
+                {doc.file?.data ? "Reemplazar PDF" : "Subir PDF"}
+                <input type="file" accept="application/pdf,.pdf" onChange={(event) => addDocFile(index, event.target.files?.[0])} />
+              </label>
+              {doc.file?.data ? <a href={doc.file.data} download={doc.file.name}>Ver PDF</a> : <span>Sin PDF cargado</span>}
+              <span className={`docExpiry ${daysUntil(doc.expiry) < 0 ? "expired" : ""}`}>{doc.expiry ? (daysUntil(doc.expiry) < 0 ? "Vencido" : `${daysUntil(doc.expiry)} dias`) : "Sin vencimiento"}</span>
+            </div>
+          </article>
+        ))}
+      </div>
+      <h3 className="sectionTitle">Mantenimiento</h3>
+      <div className="documentsList">
+        {form.maintenance.map((item, index) => (
+          <div className="maintenanceRow" key={`${item.title}-${index}`}>
+            <input value={item.title || ""} placeholder="Trabajo realizado" onChange={(event) => updateMaintenance(index, { title: event.target.value })} />
+            <input type="number" value={item.km || ""} placeholder="Km" onChange={(event) => updateMaintenance(index, { km: event.target.value })} />
+            <button className="btn" type="button" onClick={() => update("maintenance", form.maintenance.filter((_, itemIndex) => itemIndex !== index))}>Quitar</button>
+          </div>
+        ))}
+        <button className="btn" type="button" onClick={() => update("maintenance", [...form.maintenance, { year: new Date().getFullYear(), km: form.km || 0, title: "" }])}>Agregar service</button>
+      </div>
+      <h3 className="sectionTitle">Proximos services</h3>
+      <div className="documentsList">
+        {form.plan.map((item, index) => (
+          <div className="maintenanceRow" key={`${item.title}-${index}`}>
+            <input value={item.title || ""} placeholder="Service previsto" onChange={(event) => updatePlan(index, { title: event.target.value })} />
+            <input type="number" value={item.nextKm || ""} placeholder="Proximo km" onChange={(event) => updatePlan(index, { nextKm: event.target.value })} />
+            <button className="btn" type="button" onClick={() => update("plan", form.plan.filter((_, itemIndex) => itemIndex !== index))}>Quitar</button>
+          </div>
+        ))}
+        <button className="btn" type="button" onClick={() => update("plan", [...form.plan, { title: "", nextKm: Number(form.km || 0) + 10000 }])}>Agregar previsto</button>
+      </div>
+      <div className="actions">
+        <button className="btn" type="button" onClick={onCancel}>Cancelar</button>
+        <button className="btn primary">Guardar camioneta</button>
+      </div>
+    </form>
   );
 }
 
@@ -1000,14 +1189,13 @@ function SettingsPanel({ user, users, db, token, revision, onUsers, onUser, onNo
           <span className="eyebrow">CONFIGURACION</span>
           <h2>Usuarios y acceso</h2>
         </div>
-        <button className="btn primary" onClick={() => setEditingUser({ role: "chofer", currentDriverId: "" })}>
+        <button className="btn primary" onClick={() => setEditingUser({ role: "usuario" })}>
           <UserPlus size={16} /> Nuevo usuario
         </button>
       </div>
       {editingUser ? (
         <UserForm
           user={editingUser}
-          drivers={db.drivers}
           onCancel={() => setEditingUser(null)}
           onSave={saveUser}
         />
@@ -1016,7 +1204,7 @@ function SettingsPanel({ user, users, db, token, revision, onUsers, onUser, onNo
         <article className="card">
           <span className="eyebrow">USUARIO ACTUAL</span>
           <h2>{user.name || user.username}</h2>
-          <p>Rol: {user.role === "chofer" ? "Chofer" : "Supervisor"}</p>
+          <p>Rol: {roleLabel(user.role)}</p>
         </article>
         <article className="card">
           <span className="eyebrow">SINCRONIZACION</span>
@@ -1027,11 +1215,10 @@ function SettingsPanel({ user, users, db, token, revision, onUsers, onUser, onNo
           <article className="card record" key={item.id}>
             <div>
               <h3>{item.name || item.username}</h3>
-              <p>{item.username} - {item.role === "chofer" ? "Chofer" : "Supervisor"}</p>
-              <small>{item.email || "Sin email"}</small>
+              <p>{item.username} - {roleLabel(item.role)}</p>
             </div>
             <div className="recordActions">
-              <span className="status">{item.currentDriverId ? `Chofer #${item.currentDriverId}` : "Sin chofer"}</span>
+              <span className="status">{roleLabel(item.role)}</span>
               <button className="btn" onClick={() => setEditingUser(item)}><Edit3 size={15} /> Editar</button>
             </div>
           </article>
@@ -1041,13 +1228,11 @@ function SettingsPanel({ user, users, db, token, revision, onUsers, onUser, onNo
   );
 }
 
-function UserForm({ user, drivers, onCancel, onSave }) {
+function UserForm({ user, onCancel, onSave }) {
   const [form, setForm] = useState({
     username: user.username || "",
     name: user.name || "",
-    email: user.email || "",
-    role: user.role || "chofer",
-    currentDriverId: user.currentDriverId || "",
+    role: normalizedRole(user.role || "usuario"),
     password: "",
   });
   const isEditing = Boolean(user.id);
@@ -1066,9 +1251,7 @@ function UserForm({ user, drivers, onCancel, onSave }) {
       id: user.id,
       username: form.username.trim(),
       name: form.name.trim(),
-      email: form.email.trim(),
       role: form.role,
-      currentDriverId: form.currentDriverId ? Number(form.currentDriverId) : null,
       password: form.password,
     });
   }
@@ -1086,11 +1269,7 @@ function UserForm({ user, drivers, onCancel, onSave }) {
         <div><label>Nombre</label><input value={form.name} onChange={(event) => update("name", event.target.value)} required /></div>
       </div>
       <div className="row">
-        <div><label>Email</label><input type="email" value={form.email} onChange={(event) => update("email", event.target.value)} /></div>
-        <div><label>Rol</label><select value={form.role} onChange={(event) => update("role", event.target.value)}><option value="chofer">Chofer</option><option value="supervisor">Supervisor</option></select></div>
-      </div>
-      <div className="row">
-        <div><label>Chofer asociado</label><select value={form.currentDriverId} onChange={(event) => update("currentDriverId", event.target.value)}><option value="">Sin asociar</option>{drivers.map((driver) => <option key={driver.id} value={driver.id}>{driver.name}</option>)}</select></div>
+        <div><label>Rol</label><select value={form.role} onChange={(event) => update("role", event.target.value)}><option value="admin">Admin</option><option value="usuario">Usuario</option><option value="chofer">Chofer</option></select></div>
         <div><label>{isEditing ? "Nueva contrasena (opcional)" : "Contrasena inicial"}</label><input type="password" value={form.password} onChange={(event) => update("password", event.target.value)} required={!isEditing} /></div>
       </div>
       <div className="actions">

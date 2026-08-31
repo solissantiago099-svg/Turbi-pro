@@ -98,15 +98,28 @@ async function route(requestUrl) {
 
 let databaseReady;
 
+function normalizedRole(role) {
+  return role === "supervisor" ? "admin" : role || "chofer";
+}
+
+function isAdmin(user) {
+  return normalizedRole(user?.role) === "admin";
+}
+
+function validRole(role) {
+  return ["admin", "usuario", "chofer"].includes(role);
+}
+
 function bootstrapUsers(env) {
   if (!env.TAMIZ_BOOTSTRAP_USERNAME || !env.TAMIZ_BOOTSTRAP_PASSWORD_HASH) return [];
+  const role = normalizedRole(env.TAMIZ_BOOTSTRAP_ROLE || "admin");
   return [{
     id: env.TAMIZ_BOOTSTRAP_ID || env.TAMIZ_BOOTSTRAP_USERNAME,
     username: String(env.TAMIZ_BOOTSTRAP_USERNAME).trim().toLowerCase(),
     passwordHash: env.TAMIZ_BOOTSTRAP_PASSWORD_HASH,
     name: env.TAMIZ_BOOTSTRAP_NAME || "Administrador",
     email: env.TAMIZ_BOOTSTRAP_EMAIL || "",
-    role: env.TAMIZ_BOOTSTRAP_ROLE === "chofer" ? "chofer" : "supervisor",
+    role: validRole(role) ? role : "admin",
     currentDriverId: env.TAMIZ_BOOTSTRAP_DRIVER_ID ? Number(env.TAMIZ_BOOTSTRAP_DRIVER_ID) : null,
   }];
 }
@@ -202,7 +215,7 @@ async function audit(env, user, action, entity, entityId, details = null) {
 async function session(request, env) {
   const user = await currentUser(request, env);
   if (!user) return Response.json({ error: "Se requiere inicio de sesion" }, { status: 401 });
-  const users = user.role === "supervisor"
+  const users = isAdmin(user)
     ? (await env.DB.prepare("SELECT id, username, email, name, role, current_driver_id AS currentDriverId, last_seen_at AS lastSeenAt FROM app_users ORDER BY created_at ASC, last_seen_at DESC").all()).results
     : [];
   return Response.json({ user, users }, { headers: { "cache-control": "no-store" } });
@@ -211,13 +224,12 @@ async function session(request, env) {
 async function createUser(request, env) {
   const actor = await currentUser(request, env);
   if (!actor) return Response.json({ error: "Se requiere inicio de sesion" }, { status: 401 });
-  if (actor.role !== "supervisor") return Response.json({ error: "No autorizado" }, { status: 403 });
+  if (!isAdmin(actor)) return Response.json({ error: "No autorizado" }, { status: 403 });
   const payload = await request.json();
   const username = String(payload?.username || "").trim().toLowerCase();
   const name = String(payload?.name || "").trim();
-  const email = String(payload?.email || "").trim();
   const password = String(payload?.password || "");
-  const role = payload?.role === "supervisor" ? "supervisor" : "chofer";
+  const role = validRole(payload?.role) ? payload.role : "usuario";
   if (!username || !name || password.length < 6) return Response.json({ error: "Usuario invalido" }, { status: 400 });
   const exists = await env.DB.prepare("SELECT id FROM app_users WHERE lower(username) = ?").bind(username).first();
   if (exists) return Response.json({ error: "Ese usuario ya existe" }, { status: 409 });
@@ -225,32 +237,31 @@ async function createUser(request, env) {
   const hash = await sha256("tamiz-rutas:" + password);
   const now = new Date().toISOString();
   await env.DB.prepare("INSERT INTO app_users (id, username, password_hash, email, name, role, current_driver_id, last_seen_at, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)")
-    .bind(id, username, hash, email, name, role, payload.currentDriverId || null, now, now)
+    .bind(id, username, hash, "", name, role, null, now, now)
     .run();
-  await audit(env, actor, "create-user", "user", id, { username, role, currentDriverId: payload.currentDriverId || null });
+  await audit(env, actor, "create-user", "user", id, { username, role });
   return session(request, env);
 }
 
 async function updateUser(request, env) {
   const actor = await currentUser(request, env);
   if (!actor) return Response.json({ error: "Se requiere inicio de sesion" }, { status: 401 });
-  if (actor.role !== "supervisor") return Response.json({ error: "No autorizado" }, { status: 403 });
+  if (!isAdmin(actor)) return Response.json({ error: "No autorizado" }, { status: 403 });
   const payload = await request.json();
-  if (!payload?.id || !["supervisor", "chofer"].includes(payload.role)) return Response.json({ error: "Usuario invalido" }, { status: 400 });
+  if (!payload?.id || !validRole(payload.role)) return Response.json({ error: "Usuario invalido" }, { status: 400 });
   const existing = await env.DB.prepare("SELECT id FROM app_users WHERE id = ?").bind(payload.id).first();
   if (!existing) return Response.json({ error: "Usuario inexistente" }, { status: 404 });
   const name = String(payload.name || "").trim();
-  const email = String(payload.email || "").trim();
   const password = String(payload.password || "");
   if (!name) return Response.json({ error: "Nombre requerido" }, { status: 400 });
   if (password) {
     if (password.length < 6) return Response.json({ error: "La contrasena debe tener al menos 6 caracteres" }, { status: 400 });
     const hash = await sha256("tamiz-rutas:" + password);
-    await env.DB.prepare("UPDATE app_users SET email = ?, name = ?, role = ?, current_driver_id = ?, password_hash = ? WHERE id = ?").bind(email, name, payload.role, payload.currentDriverId || null, hash, payload.id).run();
+    await env.DB.prepare("UPDATE app_users SET name = ?, role = ?, current_driver_id = ?, password_hash = ? WHERE id = ?").bind(name, payload.role, null, hash, payload.id).run();
   } else {
-    await env.DB.prepare("UPDATE app_users SET email = ?, name = ?, role = ?, current_driver_id = ? WHERE id = ?").bind(email, name, payload.role, payload.currentDriverId || null, payload.id).run();
+    await env.DB.prepare("UPDATE app_users SET name = ?, role = ?, current_driver_id = ? WHERE id = ?").bind(name, payload.role, null, payload.id).run();
   }
-  await audit(env, actor, "update-user", "user", payload.id, { role: payload.role, currentDriverId: payload.currentDriverId || null, passwordChanged: Boolean(password) });
+  await audit(env, actor, "update-user", "user", payload.id, { role: payload.role, passwordChanged: Boolean(password) });
   return session(request, env);
 }
 
