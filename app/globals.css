@@ -775,6 +775,19 @@ textarea {
   color: var(--muted);
 }
 
+.accountBox {
+  display: grid;
+  gap: 8px;
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  padding: 12px;
+  background: #f8fafb;
+}
+
+.accountBox small {
+  color: var(--muted);
+}
+
 .documentItem {
   display: flex;
   align-items: center;

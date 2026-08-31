@@ -230,6 +230,7 @@ async function createUser(request, env) {
   const name = String(payload?.name || "").trim();
   const password = String(payload?.password || "");
   const role = validRole(payload?.role) ? payload.role : "usuario";
+  const currentDriverId = role === "chofer" && payload.currentDriverId ? Number(payload.currentDriverId) : null;
   if (!username || !name || password.length < 4) return Response.json({ error: "Usuario invalido" }, { status: 400 });
   const exists = await env.DB.prepare("SELECT id FROM app_users WHERE lower(username) = ?").bind(username).first();
   if (exists) return Response.json({ error: "Ese usuario ya existe" }, { status: 409 });
@@ -237,9 +238,9 @@ async function createUser(request, env) {
   const hash = await sha256("tamiz-rutas:" + password);
   const now = new Date().toISOString();
   await env.DB.prepare("INSERT INTO app_users (id, username, password_hash, email, name, role, current_driver_id, last_seen_at, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)")
-    .bind(id, username, hash, "", name, role, null, now, now)
+    .bind(id, username, hash, "", name, role, currentDriverId, now, now)
     .run();
-  await audit(env, actor, "create-user", "user", id, { username, role });
+  await audit(env, actor, "create-user", "user", id, { username, role, currentDriverId });
   return session(request, env);
 }
 
@@ -253,15 +254,16 @@ async function updateUser(request, env) {
   if (!existing) return Response.json({ error: "Usuario inexistente" }, { status: 404 });
   const name = String(payload.name || "").trim();
   const password = String(payload.password || "");
+  const currentDriverId = payload.role === "chofer" && payload.currentDriverId ? Number(payload.currentDriverId) : null;
   if (!name) return Response.json({ error: "Nombre requerido" }, { status: 400 });
   if (password) {
     if (password.length < 4) return Response.json({ error: "La contrasena debe tener al menos 4 digitos" }, { status: 400 });
     const hash = await sha256("tamiz-rutas:" + password);
-    await env.DB.prepare("UPDATE app_users SET name = ?, role = ?, current_driver_id = ?, password_hash = ? WHERE id = ?").bind(name, payload.role, null, hash, payload.id).run();
+    await env.DB.prepare("UPDATE app_users SET name = ?, role = ?, current_driver_id = ?, password_hash = ? WHERE id = ?").bind(name, payload.role, currentDriverId, hash, payload.id).run();
   } else {
-    await env.DB.prepare("UPDATE app_users SET name = ?, role = ?, current_driver_id = ? WHERE id = ?").bind(name, payload.role, null, payload.id).run();
+    await env.DB.prepare("UPDATE app_users SET name = ?, role = ?, current_driver_id = ? WHERE id = ?").bind(name, payload.role, currentDriverId, payload.id).run();
   }
-  await audit(env, actor, "update-user", "user", payload.id, { role: payload.role, passwordChanged: Boolean(password) });
+  await audit(env, actor, "update-user", "user", payload.id, { role: payload.role, currentDriverId, passwordChanged: Boolean(password) });
   return session(request, env);
 }
 

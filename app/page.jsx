@@ -368,13 +368,35 @@ export default function Home() {
     await saveState(token, nextDb, revision, "Estado actualizado");
   }
 
-  async function saveDriver(nextDriver) {
+  async function saveDriver(nextDriver, account = null) {
     const exists = db.drivers.some((driver) => Number(driver.id) === Number(nextDriver.id));
     const nextDb = {
       ...db,
       drivers: exists ? db.drivers.map((driver) => (Number(driver.id) === Number(nextDriver.id) ? nextDriver : driver)) : [...db.drivers, nextDriver],
     };
     await saveState(token, nextDb, revision, exists ? "Chofer actualizado" : "Chofer creado");
+    if (account?.username) {
+      const response = await fetch("/api/users", {
+        method: account.userId ? "PUT" : "POST",
+        headers: apiHeaders(token, { "content-type": "application/json" }),
+        body: JSON.stringify({
+          id: account.userId,
+          username: account.username,
+          name: nextDriver.name,
+          role: "chofer",
+          currentDriverId: nextDriver.id,
+          password: account.password || "",
+        }),
+      });
+      const result = await response.json().catch(() => ({}));
+      if (!response.ok) {
+        notify(result.error || "El chofer se guardo, pero no se pudo crear el usuario.", "error");
+        return;
+      }
+      setUsers(result.users || []);
+      if (result.user) setUser(result.user);
+      notify("Chofer y usuario vinculados");
+    }
   }
 
   async function saveVehicle(nextVehicle) {
@@ -520,7 +542,7 @@ export default function Home() {
 
           {view === "supervision" && <Supervision db={db} />}
           {view === "vehiculos" && <Records items={db.vehicles} type="vehicle" onSave={saveVehicle} />}
-          {view === "choferes" && <Records items={db.drivers} type="driver" onSave={saveDriver} />}
+          {view === "choferes" && <Records items={db.drivers} type="driver" users={users} onSave={saveDriver} />}
           {view === "configuracion" && <SettingsPanel user={user} users={users} db={db} token={token} revision={revision} onUsers={setUsers} onUser={setUser} onNotify={notify} />}
         </div>
       </section>
@@ -901,7 +923,7 @@ function Supervision({ db }) {
   );
 }
 
-function Records({ items, type, onSave }) {
+function Records({ items, type, users = [], onSave }) {
   const [editing, setEditing] = useState(null);
   const isDriver = type === "driver";
   const isVehicle = type === "vehicle";
@@ -921,9 +943,10 @@ function Records({ items, type, onSave }) {
       {editing && isDriver ? (
         <DriverForm
           driver={editing}
+          linkedUser={users.find((user) => Number(user.currentDriverId) === Number(editing.id))}
           onCancel={() => setEditing(null)}
-          onSave={async (driver) => {
-            await onSave(driver);
+          onSave={async (driver, account) => {
+            await onSave(driver, account);
             setEditing(null);
           }}
         />
@@ -945,6 +968,7 @@ function Records({ items, type, onSave }) {
               <h3>{item.name}</h3>
               <p>{type === "vehicle" ? `${item.brand || ""} ${item.model || ""} - ${item.plate || ""}` : `${item.phone || ""} - Registro ${item.license || ""}`}</p>
               {isDriver && item.docs?.length ? <small>{item.docs.length} documentos adjuntos</small> : null}
+              {isDriver ? <small>{users.find((user) => Number(user.currentDriverId) === Number(item.id))?.username ? `Usuario: ${users.find((user) => Number(user.currentDriverId) === Number(item.id)).username}` : "Sin usuario vinculado"}</small> : null}
               {isVehicle ? <small>{(item.docs?.length || defaultVehicleDocs().length)} documentos legales</small> : null}
             </div>
             <div className="recordActions">
@@ -1090,7 +1114,7 @@ function VehicleForm({ vehicle, onCancel, onSave }) {
   );
 }
 
-function DriverForm({ driver, onCancel, onSave }) {
+function DriverForm({ driver, linkedUser, onCancel, onSave }) {
   const [form, setForm] = useState({
     name: driver.name || "",
     phone: driver.phone || "",
@@ -1099,6 +1123,10 @@ function DriverForm({ driver, onCancel, onSave }) {
     status: driver.status || "disponible",
     notes: driver.notes || "",
     docs: driver.docs || [],
+  });
+  const [account, setAccount] = useState({
+    username: linkedUser?.username || "",
+    password: "",
   });
 
   function update(name, value) {
@@ -1121,7 +1149,14 @@ function DriverForm({ driver, onCancel, onSave }) {
 
   async function submit(event) {
     event.preventDefault();
-    await onSave({ ...driver, ...form, updatedAt: new Date().toISOString() });
+    if (account.username && !linkedUser && account.password.length < 4) {
+      alert("La cuenta del chofer necesita una contrasena inicial de al menos 4 digitos.");
+      return;
+    }
+    await onSave(
+      { ...driver, ...form, updatedAt: new Date().toISOString() },
+      account.username ? { userId: linkedUser?.id, username: account.username.trim(), password: account.password } : null,
+    );
   }
 
   return (
@@ -1146,6 +1181,20 @@ function DriverForm({ driver, onCancel, onSave }) {
       </div>
       <label>Notas</label>
       <textarea value={form.notes} onChange={(event) => update("notes", event.target.value)} />
+      <h3 className="sectionTitle">Cuenta de acceso</h3>
+      <div className="accountBox">
+        <div className="row">
+          <div>
+            <label>Nombre de usuario</label>
+            <input value={account.username} onChange={(event) => setAccount((current) => ({ ...current, username: event.target.value.trim().toLowerCase() }))} placeholder="ej: juan" disabled={Boolean(linkedUser)} />
+          </div>
+          <div>
+            <label>{linkedUser ? "Nueva contrasena (opcional)" : "Contrasena inicial"}</label>
+            <input type="password" value={account.password} onChange={(event) => setAccount((current) => ({ ...current, password: event.target.value }))} placeholder={linkedUser ? "Dejar vacio para no cambiar" : "Minimo 4 digitos"} />
+          </div>
+        </div>
+        <small>{linkedUser ? `Vinculado al usuario ${linkedUser.username}.` : "Si completas usuario y contrasena, el chofer va a poder entrar a Mi ruta."}</small>
+      </div>
       <div className="documentsList">
         {form.docs.length ? form.docs.map((doc) => (
           <div className="documentItem" key={doc.id}>
