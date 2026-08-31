@@ -334,9 +334,8 @@ export default function Home() {
           </button>
           {loginError ? <div className="notice">{loginError}</div> : null}
           <div className="hint">
-            <b>Prueba inicial</b>
-            <span>admin / admin123</span>
-            <span>chofer / chofer123</span>
+            <b>Acceso interno</b>
+            <span>Solicita tu usuario al administrador.</span>
           </div>
         </form>
       </main>

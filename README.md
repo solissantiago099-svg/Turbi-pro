@@ -11,10 +11,9 @@ App operativa para gestionar agenda de tareas, rutas, choferes y vehiculos.
 - Nueva tarea con paradas, PDF, resumen y calculo OSRM.
 - Roles iniciales: supervisor y chofer.
 
-## Usuarios iniciales
+## Usuarios
 
-- `admin / admin123`
-- `chofer / chofer123`
+Las credenciales operativas no se publican en el repositorio. Solicitar acceso al administrador de la app.
 
 ## Desarrollo local
 
