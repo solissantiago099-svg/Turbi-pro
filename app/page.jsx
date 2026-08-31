@@ -511,7 +511,6 @@ function DailySchedule({ date, tasks, db, canCreate, onFreeSlot, onStatus }) {
     <section className="dailySchedule">
       <div className="scheduleSummary">
         <span><b>{tasks.length}</b> tareas del dia</span>
-        {canCreate ? <button className="btn primary" onClick={() => onFreeSlot("09:00")}>Agregar tarea</button> : null}
       </div>
       <div className="scheduleList">
         {hours.map((hour) => {
