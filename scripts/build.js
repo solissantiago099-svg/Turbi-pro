@@ -1,10 +1,22 @@
 const fs = require("node:fs");
 const path = require("node:path");
+const { spawnSync } = require("node:child_process");
 
 const root = path.resolve(__dirname, "..");
 const dist = path.join(root, "dist");
 const server = path.join(dist, "server");
-const assetFiles = ["index.html", "styles.css", "js/app.js"];
+const out = path.join(root, "out");
+
+const nextBin = require.resolve("next/dist/bin/next");
+const nextBuild = spawnSync(process.execPath, [nextBin, "build"], {
+  cwd: root,
+  stdio: "inherit",
+  env: { ...process.env, NEXT_TELEMETRY_DISABLED: "1" },
+});
+
+if (nextBuild.status !== 0) {
+  process.exit(nextBuild.status || 1);
+}
 
 fs.rmSync(dist, { recursive: true, force: true });
 fs.mkdirSync(server, { recursive: true });
@@ -16,11 +28,22 @@ const contentTypes = {
   ".json": "application/json; charset=utf-8",
   ".svg": "image/svg+xml",
   ".png": "image/png",
+  ".ico": "image/x-icon",
+  ".webp": "image/webp",
+  ".woff": "font/woff",
+  ".woff2": "font/woff2",
 };
 
-const assets = Object.fromEntries(assetFiles.map((file) => {
-  const absolute = path.join(root, file);
-  return [`/${file.replaceAll("\\", "/")}`, {
+function listFiles(directory) {
+  return fs.readdirSync(directory, { withFileTypes: true }).flatMap((entry) => {
+    const absolute = path.join(directory, entry.name);
+    return entry.isDirectory() ? listFiles(absolute) : [absolute];
+  });
+}
+
+const assets = Object.fromEntries(listFiles(out).map((absolute) => {
+  const file = path.relative(out, absolute).replaceAll("\\", "/");
+  return [`/${file}`, {
     type: contentTypes[path.extname(file)] || "application/octet-stream",
     body: fs.readFileSync(absolute).toString("base64"),
   }];
