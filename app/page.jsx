@@ -150,6 +150,21 @@ function taskRouteURL(task) {
   return osmDirectionsURL(task.routeCoordinates) || `https://www.openstreetmap.org/search?query=${encodeMap(task.destination || task.origin)}`;
 }
 
+function taskGoogleMapsURL(task) {
+  const stops = (task.stops || []).map((stop) => (typeof stop === "string" ? stop : stop.address)).filter(Boolean);
+  const origin = task.origin || "";
+  const destination = task.destination || stops.at(-1) || origin;
+  const waypoints = task.destination ? stops : stops.slice(0, -1);
+  const params = new URLSearchParams({
+    api: "1",
+    travelmode: "driving",
+    origin,
+    destination,
+  });
+  if (waypoints.length) params.set("waypoints", waypoints.join("|"));
+  return `https://www.google.com/maps/dir/?${params.toString()}`;
+}
+
 function availableVehicle(vehicles) {
   return vehicles.find((vehicle) => !["en-taller", "fuera-de-servicio"].includes(vehicle.status)) || vehicles[0] || null;
 }
@@ -670,7 +685,8 @@ function DailyTask({ task, db, canOperate, onStatus, onEdit, outside = false }) 
           <span><b>Paradas</b>{stops.length ? stops.join(" / ") : "Sin paradas"}</span>
         </div>
         <div className="inlineActions">
-          <a className="btn" href={taskRouteURL(task)} target="_blank" rel="noreferrer">Abrir ruta</a>
+          <a className="btn primary" href={taskGoogleMapsURL(task)} target="_blank" rel="noreferrer">Abrir en Google Maps</a>
+          <a className="btn" href={taskRouteURL(task)} target="_blank" rel="noreferrer">Abrir en OSM</a>
           {task.merchandisePdf?.data ? <a className="btn" href={task.merchandisePdf.data} download={task.merchandisePdf.name}>Abrir PDF</a> : null}
           {canOperate ? <button className="btn" onClick={() => onEdit(task)}><Edit3 size={15} /> Editar</button> : null}
           {canOperate && task.status !== "en-trabajo" ? <button className="btn" onClick={() => onStatus(task, "en-trabajo")}>Iniciar</button> : null}
