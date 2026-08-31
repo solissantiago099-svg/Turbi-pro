@@ -78,16 +78,22 @@ function authHeaders(extra = {}) {
 }
 
 function showLogin(message = "") {
+  const loginScreen = $("#login-screen");
   document.body.classList.add("logged-out");
   document.body.classList.remove("auth-loading");
-  $("#login-screen").hidden = false;
+  loginScreen.hidden = false;
+  loginScreen.classList.remove("is-hidden");
+  loginScreen.style.display = "";
   $("#login-error").hidden = !message;
   if (message) $("#login-error").textContent = message;
 }
 
 function showApp() {
+  const loginScreen = $("#login-screen");
   document.body.classList.remove("logged-out", "auth-loading");
-  $("#login-screen").hidden = true;
+  loginScreen.hidden = true;
+  loginScreen.classList.add("is-hidden");
+  loginScreen.style.display = "none";
 }
 
 function safeShow(view, options = {}) {
@@ -123,7 +129,7 @@ async function login(username, password) {
   activeView = currentUser.role === "chofer" ? "ruta" : "agenda";
   await loadRemoteData();
   safeShow(activeView);
-  if (!$("#login-screen").hidden) throw new Error("La sesión inició, pero la pantalla no cambió. Recargá y volvé a intentar.");
+  if (!$("#login-screen").hidden && !$("#login-screen").classList.contains("is-hidden")) throw new Error("La sesión inició, pero la pantalla no cambió. Recargá y volvé a intentar.");
 }
 
 async function logout() {
