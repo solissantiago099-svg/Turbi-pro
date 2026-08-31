@@ -37,6 +37,7 @@ let syncRevision = 0;
 let syncSaving = false;
 let currentUser = null;
 let sessionToken = localStorage.getItem("tamiz_session") || "";
+let authRequestId = 0;
 
 function currentUserName() {
   return currentUser?.name || currentUser?.email || currentUser?.username || "Usuario";
@@ -90,12 +91,16 @@ function showApp() {
 }
 
 async function login(username, password) {
+  const requestId = ++authRequestId;
+  sessionToken = "";
+  localStorage.removeItem("tamiz_session");
   const response = await fetch("/api/login", {
     method: "POST",
     headers: { "content-type": "application/json" },
     body: JSON.stringify({ username, password }),
   });
   const payload = await response.json().catch(() => ({}));
+  if (requestId !== authRequestId) return;
   if (!response.ok) throw new Error(payload.error || "No se pudo iniciar sesión");
   sessionToken = payload.token;
   localStorage.setItem("tamiz_session", sessionToken);
@@ -107,6 +112,7 @@ async function login(username, password) {
 }
 
 async function logout() {
+  authRequestId += 1;
   try { await fetch("/api/logout", { method: "POST", headers: authHeaders() }); } catch {}
   sessionToken = "";
   currentUser = null;
@@ -115,9 +121,12 @@ async function logout() {
 }
 
 async function restoreSession() {
+  const requestId = ++authRequestId;
+  const tokenToRestore = sessionToken;
   if (!sessionToken) return showLogin();
   try {
-    const response = await fetch("/api/session", { headers: authHeaders({ accept: "application/json" }) });
+    const response = await fetch("/api/session", { headers: { accept: "application/json", authorization: `Bearer ${tokenToRestore}` } });
+    if (requestId !== authRequestId) return;
     if (!response.ok) throw new Error("Sesión vencida");
     const payload = await response.json();
     currentUser = payload.user;
@@ -126,6 +135,7 @@ async function restoreSession() {
     show(activeView);
     await loadRemoteData();
   } catch {
+    if (requestId !== authRequestId) return;
     localStorage.removeItem("tamiz_session");
     sessionToken = "";
     showLogin("Tu sesión venció. Volvé a ingresar.");
