@@ -97,10 +97,19 @@ async function route(requestUrl) {
 }
 
 let databaseReady;
-const DEMO_USERS = [
-  { id: "admin", username: "admin", passwordHash: "0ca132d6b5de89730619b605dd5a53399467a6d2fda3ef9d983ff900d08fbe54", name: "Administrador", email: "admin@tamiz.local", role: "supervisor", currentDriverId: null },
-  { id: "chofer", username: "chofer", passwordHash: "0da1c2e27296fc5b2f6fd4cca2048dcfc0a24dde628aa4daee606abc5a5d74d9", name: "Chofer Demo", email: "chofer@tamiz.local", role: "chofer", currentDriverId: 1 },
-];
+
+function bootstrapUsers(env) {
+  if (!env.TAMIZ_BOOTSTRAP_USERNAME || !env.TAMIZ_BOOTSTRAP_PASSWORD_HASH) return [];
+  return [{
+    id: env.TAMIZ_BOOTSTRAP_ID || env.TAMIZ_BOOTSTRAP_USERNAME,
+    username: String(env.TAMIZ_BOOTSTRAP_USERNAME).trim().toLowerCase(),
+    passwordHash: env.TAMIZ_BOOTSTRAP_PASSWORD_HASH,
+    name: env.TAMIZ_BOOTSTRAP_NAME || "Administrador",
+    email: env.TAMIZ_BOOTSTRAP_EMAIL || "",
+    role: env.TAMIZ_BOOTSTRAP_ROLE === "chofer" ? "chofer" : "supervisor",
+    currentDriverId: env.TAMIZ_BOOTSTRAP_DRIVER_ID ? Number(env.TAMIZ_BOOTSTRAP_DRIVER_ID) : null,
+  }];
+}
 
 async function ensureDatabase(env) {
   if (!env.DB) throw new Error("No hay base D1 configurada");
@@ -126,7 +135,7 @@ async function ensureDatabase(env) {
   if (!userColumnNames.has("username")) await env.DB.prepare("ALTER TABLE app_users ADD COLUMN username TEXT").run();
   if (!userColumnNames.has("password_hash")) await env.DB.prepare("ALTER TABLE app_users ADD COLUMN password_hash TEXT").run();
   await env.DB.prepare("CREATE UNIQUE INDEX IF NOT EXISTS idx_app_users_username ON app_users(username)").run();
-  for (const user of DEMO_USERS) {
+  for (const user of bootstrapUsers(env)) {
     await env.DB.prepare("INSERT INTO app_users (id, username, password_hash, email, name, role, current_driver_id, last_seen_at, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?) ON CONFLICT(id) DO UPDATE SET username = excluded.username, password_hash = excluded.password_hash, email = excluded.email, name = excluded.name, role = excluded.role, current_driver_id = COALESCE(app_users.current_driver_id, excluded.current_driver_id)")
       .bind(user.id, user.username, user.passwordHash, user.email, user.name, user.role, user.currentDriverId, new Date().toISOString(), new Date().toISOString())
       .run();
