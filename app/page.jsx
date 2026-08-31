@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useMemo, useState } from "react";
-import { CalendarDays, ClipboardList, LogOut, Menu, Plus, Route, Settings, Truck, Users } from "lucide-react";
+import { CalendarDays, ClipboardList, Edit3, LogOut, Menu, Plus, Route, Settings, Truck, UserPlus, Users } from "lucide-react";
 
 const views = [
   { id: "agenda", label: "Agenda", subtitle: "Planificacion diaria", icon: CalendarDays },
@@ -128,6 +128,7 @@ export default function Home() {
   const [token, setToken] = useState("");
   const [user, setUser] = useState(null);
   const [db, setDb] = useState(seed);
+  const [users, setUsers] = useState([]);
   const [revision, setRevision] = useState(0);
   const [view, setView] = useState("agenda");
   const [selectedDate, setSelectedDate] = useState(localISO());
@@ -137,6 +138,7 @@ export default function Home() {
   const [menuOpen, setMenuOpen] = useState(false);
   const [toast, setToast] = useState(null);
   const [taskPrefill, setTaskPrefill] = useState({ date: localISO(), time: "" });
+  const [editingTask, setEditingTask] = useState(null);
 
   const currentView = views.find((item) => item.id === view) || views[0];
   const isSupervisor = user?.role === "supervisor";
@@ -180,6 +182,7 @@ export default function Home() {
     if (!response.ok) throw new Error("No se pudo abrir la base compartida");
     const payload = await response.json();
     setUser((current) => ({ ...current, ...(payload.user || {}) }));
+    if (Array.isArray(payload.users)) setUsers(payload.users);
     if (payload.data) {
       setDb(payload.data);
       setRevision(Number(payload.revision || 0));
@@ -221,6 +224,7 @@ export default function Home() {
         if (!response.ok) throw new Error("Sesion vencida");
         const payload = await response.json();
         setUser(payload.user);
+        if (Array.isArray(payload.users)) setUsers(payload.users);
         setView(payload.user.role === "chofer" ? "ruta" : "agenda");
         await loadState(saved, true);
       })
@@ -257,6 +261,7 @@ export default function Home() {
       localStorage.setItem("tamiz_session", payload.token);
       setToken(payload.token);
       setUser(payload.user);
+      if (Array.isArray(payload.users)) setUsers(payload.users);
       setView(payload.user.role === "chofer" ? "ruta" : "agenda");
       await loadState(payload.token, true);
     } catch (error) {
@@ -274,11 +279,12 @@ export default function Home() {
     setView("agenda");
   }
 
-  async function addTask(nextTask) {
+  async function persistTask(nextTask, mode = "create") {
     const assigned = Number(nextTask.assigned || nextTask.duration || 0);
     const start = minutesFromTime(nextTask.start);
     const end = start + assigned;
     const conflict = db.tasks.some((task) => {
+      if (mode === "edit" && Number(task.id) === Number(nextTask.id)) return false;
       if (task.date !== nextTask.date || Number(task.driverId) !== Number(nextTask.driverId)) return false;
       const taskStart = minutesFromTime(task.start);
       const taskEnd = taskStart + Number(task.assigned || task.duration || 0);
@@ -303,15 +309,36 @@ export default function Home() {
       notify(`${invalidDoc.name} esta vencido.`, "error");
       return;
     }
-    const nextDb = { ...db, tasks: [...db.tasks, nextTask] };
-    await saveState(token, nextDb, revision, "Tarea creada");
+    const nextDb = {
+      ...db,
+      tasks: mode === "edit" ? db.tasks.map((item) => (Number(item.id) === Number(nextTask.id) ? nextTask : item)) : [...db.tasks, nextTask],
+    };
+    await saveState(token, nextDb, revision, mode === "edit" ? "Tarea actualizada" : "Tarea creada");
     setSelectedDate(nextTask.date);
     setView("agenda");
+    setEditingTask(null);
+  }
+
+  async function addTask(nextTask) {
+    await persistTask(nextTask, "create");
+  }
+
+  async function editTask(nextTask) {
+    await persistTask(nextTask, "edit");
   }
 
   async function updateTask(task, status) {
     const nextDb = { ...db, tasks: db.tasks.map((item) => (item.id === task.id ? { ...item, status } : item)) };
     await saveState(token, nextDb, revision, "Estado actualizado");
+  }
+
+  async function saveDriver(nextDriver) {
+    const exists = db.drivers.some((driver) => Number(driver.id) === Number(nextDriver.id));
+    const nextDb = {
+      ...db,
+      drivers: exists ? db.drivers.map((driver) => (Number(driver.id) === Number(nextDriver.id) ? nextDriver : driver)) : [...db.drivers, nextDriver],
+    };
+    await saveState(token, nextDb, revision, exists ? "Chofer actualizado" : "Chofer creado");
   }
 
   if (loading) return <div className="loading">Cargando TAMIZ RUTAS...</div>;
@@ -333,10 +360,6 @@ export default function Home() {
             {busy ? "Entrando..." : "Entrar"}
           </button>
           {loginError ? <div className="notice">{loginError}</div> : null}
-          <div className="hint">
-            <b>Acceso interno</b>
-            <span>Solicita tu usuario al administrador.</span>
-          </div>
         </form>
       </main>
     );
@@ -395,7 +418,7 @@ export default function Home() {
                   <span className="eyebrow">AGENDA DIARIA</span>
                   <h2>{new Date(`${selectedDate}T12:00:00`).toLocaleDateString("es-AR", { weekday: "long", day: "numeric", month: "long" })}</h2>
                 </div>
-                {isSupervisor ? <button className="btn primary" onClick={() => { setTaskPrefill({ date: selectedDate, time: "" }); setView("nueva"); }}>Agregar tarea</button> : null}
+                {isSupervisor ? <button className="btn primary" onClick={() => { setEditingTask(null); setTaskPrefill({ date: selectedDate, time: "" }); setView("nueva"); }}>Agregar tarea</button> : null}
               </div>
               <div className="week">
                 {week.map((day) => (
@@ -412,10 +435,16 @@ export default function Home() {
                 db={db}
                 canCreate={isSupervisor}
                 onFreeSlot={(time) => {
+                  setEditingTask(null);
                   setTaskPrefill({ date: selectedDate, time });
                   setView("nueva");
                 }}
                 onStatus={updateTask}
+                onEdit={(task) => {
+                  setEditingTask(task);
+                  setTaskPrefill({ date: task.date, time: task.start });
+                  setView("nueva");
+                }}
               />
             </>
           )}
@@ -436,17 +465,18 @@ export default function Home() {
             <NewTaskForm
               db={db}
               prefill={taskPrefill}
+              initialTask={editingTask}
               currentDriverId={driverId}
-              onCancel={() => setView("agenda")}
-              onCreate={addTask}
+              onCancel={() => { setEditingTask(null); setView("agenda"); }}
+              onCreate={editingTask ? editTask : addTask}
               onError={(message) => notify(message, "error")}
             />
           )}
 
           {view === "supervision" && <Supervision db={db} />}
           {view === "vehiculos" && <Records items={db.vehicles} type="vehicle" />}
-          {view === "choferes" && <Records items={db.drivers} type="driver" />}
-          {view === "configuracion" && <SettingsPanel user={user} revision={revision} />}
+          {view === "choferes" && <Records items={db.drivers} type="driver" onSave={saveDriver} />}
+          {view === "configuracion" && <SettingsPanel user={user} users={users} db={db} token={token} revision={revision} onUsers={setUsers} onUser={setUser} onNotify={notify} />}
         </div>
       </section>
       {toast ? <div className={`toast show ${toast.type === "error" ? "error" : ""}`}>{toast.message}</div> : null}
@@ -499,7 +529,7 @@ function TaskList({ tasks, db, onStatus, canOperate }) {
   );
 }
 
-function DailySchedule({ date, tasks, db, canCreate, onFreeSlot, onStatus }) {
+function DailySchedule({ date, tasks, db, canCreate, onFreeSlot, onStatus, onEdit }) {
   const hours = Array.from({ length: 13 }, (_, index) => index + 7);
   const outside = tasks.filter((task) => {
     const hour = Number(String(task.start || "00:00").split(":")[0]);
@@ -521,7 +551,7 @@ function DailySchedule({ date, tasks, db, canCreate, onFreeSlot, onStatus }) {
                 {hourValue}
               </button>
               <div className="scheduleContent">
-                {hourTasks.length ? hourTasks.map((task) => <DailyTask key={task.id} task={task} db={db} canOperate={canCreate} onStatus={onStatus} />) : (
+                {hourTasks.length ? hourTasks.map((task) => <DailyTask key={task.id} task={task} db={db} canOperate={canCreate} onStatus={onStatus} onEdit={onEdit} />) : (
                   <button className="freeSlot" disabled={!canCreate} onClick={() => onFreeSlot(hourValue)}>
                     <span>Horario libre</span>
                     <small>Agregar tarea</small>
@@ -535,7 +565,7 @@ function DailySchedule({ date, tasks, db, canCreate, onFreeSlot, onStatus }) {
           <div className="scheduleRow occupied" key={`outside-${task.id}`}>
             <span className="scheduleTime">{task.start}</span>
             <div className="scheduleContent">
-              <DailyTask task={task} db={db} canOperate={canCreate} onStatus={onStatus} outside />
+              <DailyTask task={task} db={db} canOperate={canCreate} onStatus={onStatus} onEdit={onEdit} outside />
             </div>
           </div>
         ))}
@@ -544,7 +574,7 @@ function DailySchedule({ date, tasks, db, canCreate, onFreeSlot, onStatus }) {
   );
 }
 
-function DailyTask({ task, db, canOperate, onStatus, outside = false }) {
+function DailyTask({ task, db, canOperate, onStatus, onEdit, outside = false }) {
   const driver = db.drivers.find((item) => Number(item.id) === Number(task.driverId));
   const vehicle = db.vehicles.find((item) => Number(item.id) === Number(task.vehicleId));
   const stops = (task.stops || []).map((stop) => (typeof stop === "string" ? stop : stop.address)).filter(Boolean);
@@ -575,6 +605,7 @@ function DailyTask({ task, db, canOperate, onStatus, outside = false }) {
         <div className="inlineActions">
           <a className="btn" href={taskRouteURL(task)} target="_blank" rel="noreferrer">Abrir ruta</a>
           {task.merchandisePdf?.data ? <a className="btn" href={task.merchandisePdf.data} download={task.merchandisePdf.name}>Abrir PDF</a> : null}
+          {canOperate ? <button className="btn" onClick={() => onEdit(task)}><Edit3 size={15} /> Editar</button> : null}
           {canOperate && task.status !== "en-trabajo" ? <button className="btn" onClick={() => onStatus(task, "en-trabajo")}>Iniciar</button> : null}
           {canOperate && task.status !== "realizada" ? <button className="btn primary" onClick={() => onStatus(task, "realizada")}>Finalizar</button> : null}
         </div>
@@ -592,32 +623,43 @@ function Accordion({ title, children, defaultOpen = false }) {
   );
 }
 
-function NewTaskForm({ db, prefill, currentDriverId, onCancel, onCreate, onError }) {
-  const [form, setForm] = useState({
-    title: "",
-    merchandise: "",
-    quantities: "",
-    observations: "",
-    date: prefill.date || localISO(),
-    start: prefill.time || "",
-    assigned: "",
-    duration: "",
-    origin: "",
-    stops: "",
-    destination: "",
-    contact: "",
-    phone: "",
-    assignedBy: "",
-    driverId: currentDriverId || db.drivers[0]?.id || "",
-    vehicleId: availableVehicle(db.vehicles)?.id || "",
-  });
+function taskToForm(task, prefill, currentDriverId, db) {
+  return {
+    title: task?.title || "",
+    merchandise: task?.merchandise || "",
+    quantities: task?.quantities || "",
+    observations: task?.observations || "",
+    date: task?.date || prefill.date || localISO(),
+    start: task?.start || prefill.time || "",
+    assigned: task?.assigned ? String(task.assigned) : task?.duration ? String(task.duration) : "",
+    duration: task?.duration ? String(task.duration) : task?.assigned ? String(task.assigned) : "",
+    origin: task?.origin || "",
+    stops: Array.isArray(task?.stops) ? task.stops.map((stop) => (typeof stop === "string" ? stop : stop.address)).filter(Boolean).join("\n") : "",
+    destination: task?.destination || "",
+    contact: task?.contact || "",
+    phone: task?.phone || "",
+    assignedBy: task?.assignedBy || "",
+    driverId: task?.driverId || currentDriverId || db.drivers[0]?.id || "",
+    vehicleId: task?.vehicleId || availableVehicle(db.vehicles)?.id || "",
+  };
+}
+
+function NewTaskForm({ db, prefill, initialTask = null, currentDriverId, onCancel, onCreate, onError }) {
+  const [form, setForm] = useState(() => taskToForm(initialTask, prefill, currentDriverId, db));
   const [routeInfo, setRouteInfo] = useState({ status: "El destino final es opcional. Podes cargar varias direcciones en Paradas.", distance: "", coordinates: [] });
   const [calculating, setCalculating] = useState(false);
   const [pdf, setPdf] = useState(null);
+  const isEditing = Boolean(initialTask);
 
   useEffect(() => {
-    setForm((current) => ({ ...current, date: prefill.date || localISO(), start: prefill.time || "" }));
-  }, [prefill]);
+    setForm(taskToForm(initialTask, prefill, currentDriverId, db));
+    setPdf(null);
+    setRouteInfo({
+      status: initialTask?.distance ? `${initialTask.duration || initialTask.assigned || 0} min - ${initialTask.distance} km, estimado guardado.` : "El destino final es opcional. Podes cargar varias direcciones en Paradas.",
+      distance: initialTask?.distance || "",
+      coordinates: initialTask?.routeCoordinates || [],
+    });
+  }, [initialTask, prefill, currentDriverId, db]);
 
   useEffect(() => {
     const addresses = [form.origin, ...form.stops.split("\n").map((value) => value.trim()).filter(Boolean), form.destination].filter(Boolean);
@@ -672,7 +714,7 @@ function NewTaskForm({ db, prefill, currentDriverId, onCancel, onCreate, onError
       onError("Esperá a que OSRM calcule la duracion o revisá las direcciones.");
       return;
     }
-    let merchandisePdf = null;
+    let merchandisePdf = initialTask?.merchandisePdf || null;
     if (pdf) {
       if (pdf.type !== "application/pdf") {
         onError("El adjunto debe ser un archivo PDF.");
@@ -685,7 +727,8 @@ function NewTaskForm({ db, prefill, currentDriverId, onCancel, onCreate, onError
       merchandisePdf = { name: pdf.name, size: pdf.size, data: await fileToDataURL(pdf) };
     }
     await onCreate({
-      id: Date.now(),
+      ...initialTask,
+      id: initialTask?.id || Date.now(),
       title: form.title,
       description: form.title,
       merchandise: form.merchandise,
@@ -706,8 +749,9 @@ function NewTaskForm({ db, prefill, currentDriverId, onCancel, onCreate, onError
       vehicleId: Number(form.vehicleId),
       distance: Number(routeInfo.distance || 0),
       routeCoordinates: routeInfo.coordinates,
-      status: "pendiente",
-      createdAt: new Date().toISOString(),
+      status: initialTask?.status || "pendiente",
+      createdAt: initialTask?.createdAt || new Date().toISOString(),
+      updatedAt: isEditing ? new Date().toISOString() : initialTask?.updatedAt,
     });
   }
 
@@ -727,7 +771,7 @@ function NewTaskForm({ db, prefill, currentDriverId, onCancel, onCreate, onError
           <label className="pdfUpload">
             <input type="file" accept="application/pdf,.pdf" onChange={(event) => setPdf(event.target.files?.[0] || null)} />
             <span>Seleccionar archivo PDF</span>
-            <small>{pdf?.name || "Ningun archivo seleccionado"}</small>
+            <small>{pdf?.name || initialTask?.merchandisePdf?.name || "Ningun archivo seleccionado"}</small>
           </label>
           <label>Observaciones</label>
           <textarea value={form.observations} onChange={(event) => update("observations", event.target.value)} />
@@ -770,7 +814,7 @@ function NewTaskForm({ db, prefill, currentDriverId, onCancel, onCreate, onError
 
         <div className="actions">
           <button className="btn" type="button" onClick={onCancel}>Cancelar</button>
-          <button className="btn primary" disabled={calculating}>Guardar y asignar tarea</button>
+          <button className="btn primary" disabled={calculating}>{isEditing ? "Guardar cambios" : "Guardar y asignar tarea"}</button>
         </div>
       </form>
       <aside className="summaryCard">
@@ -812,35 +856,247 @@ function Supervision({ db }) {
   );
 }
 
-function Records({ items, type }) {
+function Records({ items, type, onSave }) {
+  const [editing, setEditing] = useState(null);
+  const isDriver = type === "driver";
   return (
-    <section className="grid">
-      {items.map((item) => (
-        <article className="card record" key={item.id}>
+    <>
+      {isDriver ? (
+        <div className="toolbar">
           <div>
-            <h3>{item.name}</h3>
-            <p>{type === "vehicle" ? `${item.brand || ""} ${item.model || ""} - ${item.plate || ""}` : `${item.phone || ""} - Registro ${item.license || ""}`}</p>
+            <span className="eyebrow">CHOFERES</span>
+            <h2>Equipo y documentacion</h2>
           </div>
-          <span className="status">{item.status || "activo"}</span>
-        </article>
-      ))}
-    </section>
+          <button className="btn primary" onClick={() => setEditing({ id: Date.now(), status: "disponible", docs: [] })}>
+            <UserPlus size={16} /> Nuevo chofer
+          </button>
+        </div>
+      ) : null}
+      {editing && isDriver ? (
+        <DriverForm
+          driver={editing}
+          onCancel={() => setEditing(null)}
+          onSave={async (driver) => {
+            await onSave(driver);
+            setEditing(null);
+          }}
+        />
+      ) : null}
+      <section className="grid">
+        {items.map((item) => (
+          <article className="card record" key={item.id}>
+            <div>
+              <h3>{item.name}</h3>
+              <p>{type === "vehicle" ? `${item.brand || ""} ${item.model || ""} - ${item.plate || ""}` : `${item.phone || ""} - Registro ${item.license || ""}`}</p>
+              {isDriver && item.docs?.length ? <small>{item.docs.length} documentos adjuntos</small> : null}
+            </div>
+            <div className="recordActions">
+              <span className="status">{item.status || "activo"}</span>
+              {isDriver ? <button className="btn" onClick={() => setEditing(item)}><Edit3 size={15} /> Editar</button> : null}
+            </div>
+          </article>
+        ))}
+      </section>
+    </>
   );
 }
 
-function SettingsPanel({ user, revision }) {
+function DriverForm({ driver, onCancel, onSave }) {
+  const [form, setForm] = useState({
+    name: driver.name || "",
+    phone: driver.phone || "",
+    license: driver.license || "",
+    licenseExpiry: driver.licenseExpiry || "",
+    status: driver.status || "disponible",
+    notes: driver.notes || "",
+    docs: driver.docs || [],
+  });
+
+  function update(name, value) {
+    setForm((current) => ({ ...current, [name]: value }));
+  }
+
+  async function addDocument(file) {
+    if (!file) return;
+    if (file.size > 1500000) {
+      alert("El archivo supera el maximo de 1,5 MB.");
+      return;
+    }
+    const data = await fileToDataURL(file);
+    update("docs", [...form.docs, { id: Date.now(), name: file.name, size: file.size, type: file.type, data, uploadedAt: new Date().toISOString() }]);
+  }
+
+  function removeDocument(id) {
+    update("docs", form.docs.filter((doc) => doc.id !== id));
+  }
+
+  async function submit(event) {
+    event.preventDefault();
+    await onSave({ ...driver, ...form, updatedAt: new Date().toISOString() });
+  }
+
   return (
-    <section className="grid">
-      <article className="card">
-        <span className="eyebrow">USUARIO</span>
-        <h2>{user.name || user.username}</h2>
-        <p>Rol: {user.role === "chofer" ? "Chofer" : "Supervisor"}</p>
-      </article>
-      <article className="card">
-        <span className="eyebrow">SINCRONIZACION</span>
-        <h2>Base compartida</h2>
-        <p>Revision actual: {revision}</p>
-      </article>
-    </section>
+    <form className="card editorForm" onSubmit={submit}>
+      <div className="formTitle">
+        <div>
+          <span className="eyebrow">CHOFER</span>
+          <h2>{driver.name ? "Editar chofer" : "Nuevo chofer"}</h2>
+        </div>
+      </div>
+      <div className="row">
+        <div><label>Nombre</label><input value={form.name} onChange={(event) => update("name", event.target.value)} required /></div>
+        <div><label>Telefono</label><input value={form.phone} onChange={(event) => update("phone", event.target.value)} inputMode="tel" /></div>
+      </div>
+      <div className="row">
+        <div><label>Registro / categoria</label><input value={form.license} onChange={(event) => update("license", event.target.value)} /></div>
+        <div><label>Vencimiento registro</label><input type="date" value={form.licenseExpiry} onChange={(event) => update("licenseExpiry", event.target.value)} /></div>
+      </div>
+      <div className="row">
+        <div><label>Estado</label><select value={form.status} onChange={(event) => update("status", event.target.value)}><option value="disponible">Disponible</option><option value="ocupado">Ocupado</option><option value="inactivo">Inactivo</option></select></div>
+        <div><label>Adjuntar documentacion</label><input type="file" accept="application/pdf,image/*" onChange={(event) => addDocument(event.target.files?.[0])} /></div>
+      </div>
+      <label>Notas</label>
+      <textarea value={form.notes} onChange={(event) => update("notes", event.target.value)} />
+      <div className="documentsList">
+        {form.docs.length ? form.docs.map((doc) => (
+          <div className="documentItem" key={doc.id}>
+            <a href={doc.data} download={doc.name}>{doc.name}</a>
+            <button className="btn" type="button" onClick={() => removeDocument(doc.id)}>Quitar</button>
+          </div>
+        )) : <span>No hay documentacion adjunta.</span>}
+      </div>
+      <div className="actions">
+        <button className="btn" type="button" onClick={onCancel}>Cancelar</button>
+        <button className="btn primary">Guardar chofer</button>
+      </div>
+    </form>
+  );
+}
+
+function SettingsPanel({ user, users, db, token, revision, onUsers, onUser, onNotify }) {
+  const [editingUser, setEditingUser] = useState(null);
+
+  async function saveUser(payload) {
+    const response = await fetch("/api/users", {
+      method: payload.id ? "PUT" : "POST",
+      headers: apiHeaders(token, { "content-type": "application/json" }),
+      body: JSON.stringify(payload),
+    });
+    const result = await response.json().catch(() => ({}));
+    if (!response.ok) {
+      onNotify(result.error || "No se pudo guardar el usuario", "error");
+      return;
+    }
+    onUsers(result.users || []);
+    if (result.user) onUser(result.user);
+    setEditingUser(null);
+    onNotify(payload.id ? "Usuario actualizado" : "Usuario creado");
+  }
+
+  return (
+    <>
+      <div className="toolbar">
+        <div>
+          <span className="eyebrow">CONFIGURACION</span>
+          <h2>Usuarios y acceso</h2>
+        </div>
+        <button className="btn primary" onClick={() => setEditingUser({ role: "chofer", currentDriverId: "" })}>
+          <UserPlus size={16} /> Nuevo usuario
+        </button>
+      </div>
+      {editingUser ? (
+        <UserForm
+          user={editingUser}
+          drivers={db.drivers}
+          onCancel={() => setEditingUser(null)}
+          onSave={saveUser}
+        />
+      ) : null}
+      <section className="grid">
+        <article className="card">
+          <span className="eyebrow">USUARIO ACTUAL</span>
+          <h2>{user.name || user.username}</h2>
+          <p>Rol: {user.role === "chofer" ? "Chofer" : "Supervisor"}</p>
+        </article>
+        <article className="card">
+          <span className="eyebrow">SINCRONIZACION</span>
+          <h2>Base compartida</h2>
+          <p>Revision actual: {revision}</p>
+        </article>
+        {users.map((item) => (
+          <article className="card record" key={item.id}>
+            <div>
+              <h3>{item.name || item.username}</h3>
+              <p>{item.username} - {item.role === "chofer" ? "Chofer" : "Supervisor"}</p>
+              <small>{item.email || "Sin email"}</small>
+            </div>
+            <div className="recordActions">
+              <span className="status">{item.currentDriverId ? `Chofer #${item.currentDriverId}` : "Sin chofer"}</span>
+              <button className="btn" onClick={() => setEditingUser(item)}><Edit3 size={15} /> Editar</button>
+            </div>
+          </article>
+        ))}
+      </section>
+    </>
+  );
+}
+
+function UserForm({ user, drivers, onCancel, onSave }) {
+  const [form, setForm] = useState({
+    username: user.username || "",
+    name: user.name || "",
+    email: user.email || "",
+    role: user.role || "chofer",
+    currentDriverId: user.currentDriverId || "",
+    password: "",
+  });
+  const isEditing = Boolean(user.id);
+
+  function update(name, value) {
+    setForm((current) => ({ ...current, [name]: value }));
+  }
+
+  async function submit(event) {
+    event.preventDefault();
+    if (!isEditing && form.password.length < 6) {
+      alert("La contrasena inicial debe tener al menos 6 caracteres.");
+      return;
+    }
+    await onSave({
+      id: user.id,
+      username: form.username.trim(),
+      name: form.name.trim(),
+      email: form.email.trim(),
+      role: form.role,
+      currentDriverId: form.currentDriverId ? Number(form.currentDriverId) : null,
+      password: form.password,
+    });
+  }
+
+  return (
+    <form className="card editorForm" onSubmit={submit}>
+      <div className="formTitle">
+        <div>
+          <span className="eyebrow">USUARIO</span>
+          <h2>{isEditing ? "Editar usuario" : "Nuevo usuario"}</h2>
+        </div>
+      </div>
+      <div className="row">
+        <div><label>Usuario</label><input value={form.username} onChange={(event) => update("username", event.target.value)} required disabled={isEditing} /></div>
+        <div><label>Nombre</label><input value={form.name} onChange={(event) => update("name", event.target.value)} required /></div>
+      </div>
+      <div className="row">
+        <div><label>Email</label><input type="email" value={form.email} onChange={(event) => update("email", event.target.value)} /></div>
+        <div><label>Rol</label><select value={form.role} onChange={(event) => update("role", event.target.value)}><option value="chofer">Chofer</option><option value="supervisor">Supervisor</option></select></div>
+      </div>
+      <div className="row">
+        <div><label>Chofer asociado</label><select value={form.currentDriverId} onChange={(event) => update("currentDriverId", event.target.value)}><option value="">Sin asociar</option>{drivers.map((driver) => <option key={driver.id} value={driver.id}>{driver.name}</option>)}</select></div>
+        <div><label>{isEditing ? "Nueva contrasena (opcional)" : "Contrasena inicial"}</label><input type="password" value={form.password} onChange={(event) => update("password", event.target.value)} required={!isEditing} /></div>
+      </div>
+      <div className="actions">
+        <button className="btn" type="button" onClick={onCancel}>Cancelar</button>
+        <button className="btn primary">Guardar usuario</button>
+      </div>
+    </form>
   );
 }

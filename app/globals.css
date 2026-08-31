@@ -736,6 +736,64 @@ textarea {
   color: var(--muted);
 }
 
+.record small {
+  color: var(--muted);
+}
+
+.recordActions {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+}
+
+.editorForm {
+  margin-bottom: 14px;
+}
+
+.formTitle {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  margin-bottom: 4px;
+}
+
+.formTitle h2 {
+  margin: 4px 0 0;
+}
+
+.documentsList {
+  display: grid;
+  gap: 8px;
+  margin-top: 12px;
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  padding: 10px;
+  background: #f8fafb;
+  color: var(--muted);
+}
+
+.documentItem {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  border-radius: 8px;
+  padding: 8px;
+  background: #fff;
+}
+
+.documentItem a {
+  min-width: 0;
+  overflow: hidden;
+  color: var(--blue);
+  font-weight: 800;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
 .toast {
   position: fixed;
   right: 18px;
@@ -920,5 +978,21 @@ textarea {
 
   .actions .btn {
     flex: 1;
+  }
+
+  .toolbar,
+  .agendaHead,
+  .record {
+    align-items: stretch;
+    flex-direction: column;
+  }
+
+  .recordActions {
+    justify-content: flex-start;
+  }
+
+  .documentItem {
+    align-items: stretch;
+    flex-direction: column;
   }
 }
