@@ -391,7 +391,6 @@ export default function Home() {
         <div className="panel">
           {view === "agenda" && (
             <>
-              <Kpis tasks={db.tasks} vehicles={db.vehicles} drivers={db.drivers} />
               <div className="agendaHead">
                 <div>
                   <span className="eyebrow">AGENDA DIARIA</span>
