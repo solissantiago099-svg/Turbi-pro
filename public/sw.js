@@ -1,4 +1,4 @@
-const CACHE_NAME = "tamiz-rutas-shell-v1";
+const CACHE_NAME = "tamiz-rutas-shell-v2";
 const APP_SHELL = ["/", "/manifest.webmanifest", "/icons/icon-192.png", "/icons/icon-512.png", "/apple-touch-icon.png"];
 
 self.addEventListener("install", (event) => {
