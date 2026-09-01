@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useMemo, useRef, useState } from "react";
-import { CalendarDays, ClipboardList, Edit3, LogOut, Menu, Plus, Route, Settings, Truck, UserPlus, Users } from "lucide-react";
+import { CalendarDays, ClipboardList, Download, Edit3, LogOut, Menu, Plus, Route, Settings, Truck, UserPlus, Users, X } from "lucide-react";
 
 const views = [
   { id: "agenda", label: "Agenda", subtitle: "Planificacion diaria", icon: CalendarDays },
@@ -175,6 +175,7 @@ function apiHeaders(token, extra = {}) {
 
 export default function Home() {
   const menuTouch = useRef({ x: 0, y: 0, tracking: false });
+  const installPrompt = useRef(null);
   const [token, setToken] = useState("");
   const [user, setUser] = useState(null);
   const [db, setDb] = useState(seed);
@@ -187,6 +188,7 @@ export default function Home() {
   const [busy, setBusy] = useState(false);
   const [menuOpen, setMenuOpen] = useState(false);
   const [toast, setToast] = useState(null);
+  const [installBanner, setInstallBanner] = useState({ visible: false, mode: "" });
   const [taskPrefill, setTaskPrefill] = useState({ date: localISO(), time: "" });
   const [editingTask, setEditingTask] = useState(null);
 
@@ -306,6 +308,57 @@ export default function Home() {
       document.body.classList.remove("menuLocked");
     };
   }, [menuOpen]);
+
+  useEffect(() => {
+    const alreadyInstalled =
+      window.matchMedia("(display-mode: standalone)").matches ||
+      window.navigator.standalone === true ||
+      localStorage.getItem("tamiz_install_dismissed") === "1";
+    if (alreadyInstalled) return undefined;
+
+    const isiOS = /iphone|ipad|ipod/i.test(window.navigator.userAgent);
+    const guideTimer = window.setTimeout(() => {
+      if (isiOS) setInstallBanner({ visible: true, mode: "ios" });
+    }, 2200);
+
+    const handleBeforeInstallPrompt = (event) => {
+      event.preventDefault();
+      installPrompt.current = event;
+      window.clearTimeout(guideTimer);
+      setInstallBanner({ visible: true, mode: "prompt" });
+    };
+
+    const handleInstalled = () => {
+      installPrompt.current = null;
+      localStorage.setItem("tamiz_install_dismissed", "1");
+      setInstallBanner({ visible: false, mode: "" });
+    };
+
+    window.addEventListener("beforeinstallprompt", handleBeforeInstallPrompt);
+    window.addEventListener("appinstalled", handleInstalled);
+    return () => {
+      window.clearTimeout(guideTimer);
+      window.removeEventListener("beforeinstallprompt", handleBeforeInstallPrompt);
+      window.removeEventListener("appinstalled", handleInstalled);
+    };
+  }, []);
+
+  async function installApp() {
+    const prompt = installPrompt.current;
+    if (!prompt) {
+      setInstallBanner({ visible: true, mode: "ios" });
+      return;
+    }
+    prompt.prompt();
+    await prompt.userChoice.catch(() => null);
+    installPrompt.current = null;
+    setInstallBanner({ visible: false, mode: "" });
+  }
+
+  function dismissInstallBanner() {
+    localStorage.setItem("tamiz_install_dismissed", "1");
+    setInstallBanner({ visible: false, mode: "" });
+  }
 
   function beginMenuSwipe(event) {
     const touch = event.touches?.[0];
@@ -603,6 +656,21 @@ export default function Home() {
         </div>
       </section>
       {toast ? <div className={`toast show ${toast.type === "error" ? "error" : ""}`}>{toast.message}</div> : null}
+      {installBanner.visible ? (
+        <div className="installBanner" role="status">
+          <div className="installIcon">
+            <Download size={20} />
+          </div>
+          <div className="installCopy">
+            <b>Instalar TAMIZ RUTAS</b>
+            <p>{installBanner.mode === "ios" ? "En iPhone: Compartir y Agregar a pantalla de inicio." : "Usala como app desde el inicio del celu."}</p>
+          </div>
+          {installBanner.mode === "prompt" ? <button className="btn primary" onClick={installApp}>Instalar</button> : null}
+          <button className="btn iconOnly" aria-label="Cerrar sugerencia" onClick={dismissInstallBanner}>
+            <X size={18} />
+          </button>
+        </div>
+      ) : null}
     </main>
   );
 }
