@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { CalendarDays, ClipboardList, Edit3, LogOut, Menu, Plus, Route, Settings, Truck, UserPlus, Users } from "lucide-react";
 
 const views = [
@@ -174,6 +174,7 @@ function apiHeaders(token, extra = {}) {
 }
 
 export default function Home() {
+  const menuTouch = useRef({ x: 0, y: 0, tracking: false });
   const [token, setToken] = useState("");
   const [user, setUser] = useState(null);
   const [db, setDb] = useState(seed);
@@ -292,6 +293,40 @@ export default function Home() {
     const timer = window.setInterval(() => loadState(token, true).catch(() => null), 10000);
     return () => window.clearInterval(timer);
   }, [token, user]);
+
+  useEffect(() => {
+    if (!menuOpen) return undefined;
+    const closeOnEscape = (event) => {
+      if (event.key === "Escape") setMenuOpen(false);
+    };
+    document.addEventListener("keydown", closeOnEscape);
+    document.body.classList.add("menuLocked");
+    return () => {
+      document.removeEventListener("keydown", closeOnEscape);
+      document.body.classList.remove("menuLocked");
+    };
+  }, [menuOpen]);
+
+  function beginMenuSwipe(event) {
+    const touch = event.touches?.[0];
+    if (!touch) return;
+    menuTouch.current = { x: touch.clientX, y: touch.clientY, tracking: true };
+  }
+
+  function trackMenuSwipe(event) {
+    const touch = event.touches?.[0];
+    if (!touch || !menuTouch.current.tracking) return;
+    const deltaX = touch.clientX - menuTouch.current.x;
+    const deltaY = touch.clientY - menuTouch.current.y;
+    if (deltaX < -48 && Math.abs(deltaX) > Math.abs(deltaY) * 1.25) {
+      menuTouch.current.tracking = false;
+      setMenuOpen(false);
+    }
+  }
+
+  function endMenuSwipe() {
+    menuTouch.current.tracking = false;
+  }
 
   async function handleLogin(event) {
     event.preventDefault();
@@ -449,7 +484,14 @@ export default function Home() {
 
   return (
     <main className={`shell ${menuOpen ? "menuOpen" : ""}`}>
-      <aside className="sidebar">
+      <button className="sidebarBackdrop" aria-label="Cerrar menu" onClick={() => setMenuOpen(false)} />
+      <aside
+        className="sidebar"
+        onTouchStart={beginMenuSwipe}
+        onTouchMove={trackMenuSwipe}
+        onTouchEnd={endMenuSwipe}
+        onTouchCancel={endMenuSwipe}
+      >
         <div className="brand">
           TAMIZ <span>RUTAS</span>
         </div>

@@ -31,6 +31,11 @@ body {
   font-size: 15px;
 }
 
+body.menuLocked {
+  overflow: hidden;
+  touch-action: none;
+}
+
 button,
 input,
 select,
@@ -315,6 +320,10 @@ textarea {
 }
 
 .menuButton {
+  display: none;
+}
+
+.sidebarBackdrop {
   display: none;
 }
 
@@ -986,20 +995,33 @@ textarea {
     z-index: 30;
     width: min(84vw, 310px);
     transform: translateX(-100%);
-    transition: 0.22s ease;
+    transition: transform 0.24s ease;
     box-shadow: 18px 0 44px rgba(0, 0, 0, 0.28);
+    touch-action: pan-y;
+    will-change: transform;
   }
 
   .shell.menuOpen .sidebar {
     transform: none;
   }
 
-  .shell.menuOpen::after {
-    content: "";
+  .sidebarBackdrop {
     position: fixed;
     inset: 0;
     z-index: 20;
+    display: block;
+    border: 0;
+    padding: 0;
     background: rgba(0, 0, 0, 0.45);
+    opacity: 0;
+    pointer-events: none;
+    transition: opacity 0.2s ease;
+    -webkit-tap-highlight-color: transparent;
+  }
+
+  .shell.menuOpen .sidebarBackdrop {
+    opacity: 1;
+    pointer-events: auto;
   }
 
   .menuButton {
