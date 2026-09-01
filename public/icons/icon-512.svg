@@ -1,0 +1,9 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="512" height="512" viewBox="0 0 512 512" role="img" aria-label="TAMIZ RUTAS">
+  <rect width="512" height="512" rx="112" fill="#08213b"/>
+  <path d="M112 320h245c29 0 53-24 53-53v-64c0-29-24-53-53-53H112v170Z" fill="#0b9348"/>
+  <path d="M152 208h141c21 0 37 16 37 37s-16 37-37 37H152v-74Z" fill="#ffffff"/>
+  <path d="M352 216h32l32 40v26h-64v-66Z" fill="#ffffff"/>
+  <circle cx="176" cy="338" r="29" fill="#ffffff"/>
+  <circle cx="365" cy="338" r="29" fill="#ffffff"/>
+  <path d="M138 130h236" stroke="#ffffff" stroke-width="28" stroke-linecap="round"/>
+</svg>

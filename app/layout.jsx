@@ -1,8 +1,19 @@
 import "./globals.css";
+import PwaRegister from "./PwaRegister";
 
 export const metadata = {
   title: "TAMIZ RUTAS",
   description: "Agenda operativa compartida para rutas, choferes y vehiculos.",
+  manifest: "/manifest.webmanifest",
+  appleWebApp: {
+    capable: true,
+    title: "TAMIZ RUTAS",
+    statusBarStyle: "black-translucent",
+  },
+  icons: {
+    icon: "/icons/icon-192.svg",
+    apple: "/icons/icon-192.svg",
+  },
 };
 
 export const viewport = {
@@ -14,7 +25,10 @@ export const viewport = {
 export default function RootLayout({ children }) {
   return (
     <html lang="es">
-      <body>{children}</body>
+      <body>
+        <PwaRegister />
+        {children}
+      </body>
     </html>
   );
 }

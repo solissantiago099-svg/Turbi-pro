@@ -26,6 +26,7 @@ const contentTypes = {
   ".css": "text/css; charset=utf-8",
   ".js": "text/javascript; charset=utf-8",
   ".json": "application/json; charset=utf-8",
+  ".webmanifest": "application/manifest+json; charset=utf-8",
   ".svg": "image/svg+xml",
   ".png": "image/png",
   ".ico": "image/x-icon",
@@ -63,7 +64,7 @@ function decode(base64) {
 function assetResponse(pathname) {
   const asset = ASSETS[pathname] || (pathname.endsWith("/") ? ASSETS[pathname + "index.html"] : null);
   if (!asset) return null;
-  const noCache = pathname === "/" || pathname.endsWith(".html") || pathname.endsWith(".js") || pathname.endsWith(".css");
+  const noCache = pathname === "/" || pathname === "/sw.js" || pathname.endsWith(".html") || pathname.endsWith(".js") || pathname.endsWith(".css") || pathname.endsWith(".webmanifest");
   return new Response(decode(asset.body), {
     headers: {
       "content-type": asset.type,
