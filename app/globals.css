@@ -1,20 +1,26 @@
 :root {
-  --navy: #08213b;
-  --ink: #132238;
-  --muted: #677484;
-  --line: #dde5ec;
-  --soft: #f4f7f9;
-  --green: #0b9348;
-  --green-dark: #08783a;
-  --amber: #dc8b14;
-  --red: #cf3f3f;
-  --blue: #2365a9;
-  --cyan: #0f7b86;
-  --paper: #ffffff;
-  --surface: #f8fbfd;
-  --shadow-sm: 0 1px 2px rgba(9, 33, 59, 0.06), 0 8px 20px rgba(9, 33, 59, 0.05);
-  --shadow-md: 0 14px 38px rgba(9, 33, 59, 0.12);
-  font-family: Inter, ui-sans-serif, system-ui, -apple-system, "Segoe UI", sans-serif;
+  --navy: #2b4238;
+  --ink: #2a2927;
+  --muted: #788272;
+  --line: #e4ddd3;
+  --soft: #faf8ed;
+  --green: #2b4238;
+  --green-dark: #1f342b;
+  --amber: #b7b683;
+  --red: #8b3742;
+  --blue: #4b3742;
+  --cyan: #788272;
+  --plum: #463742;
+  --mauve: #8b7880;
+  --blush: #f0e2dd;
+  --paper: #fffdf7;
+  --surface: #f7f4e8;
+  --shadow-sm: 0 1px 2px rgba(42, 41, 39, 0.05), 0 10px 24px rgba(42, 41, 39, 0.06);
+  --shadow-md: 0 18px 42px rgba(42, 41, 39, 0.14);
+  --font-sans: "Albert Sans", Inter, ui-sans-serif, system-ui, -apple-system, "Segoe UI", sans-serif;
+  --font-display: "Bodoni 72", Didot, "Times New Roman", serif;
+  --font-mono: "GT America Mono", "SFMono-Regular", Consolas, monospace;
+  font-family: var(--font-sans);
   color-scheme: light;
 }
 
@@ -26,7 +32,7 @@ body {
   margin: 0;
   min-height: 100vh;
   background:
-    linear-gradient(180deg, #eef4f8 0, #f7fafc 280px, #eef3f6 100%);
+    linear-gradient(180deg, #fffdf7 0, #faf8ed 310px, #f1ede2 100%);
   color: var(--ink);
   font-size: 15px;
 }
@@ -48,7 +54,7 @@ button {
 }
 
 ::selection {
-  background: #bcebd0;
+  background: #e5e3ba;
   color: var(--navy);
 }
 
@@ -66,14 +72,14 @@ button {
   place-items: center;
   padding: 20px;
   background:
-    linear-gradient(135deg, rgba(6, 25, 45, 0.98), rgba(11, 68, 80, 0.96) 58%, rgba(8, 120, 58, 0.96)),
-    linear-gradient(90deg, transparent 0 23px, rgba(255, 255, 255, 0.05) 24px 25px, transparent 26px 100%);
+    linear-gradient(135deg, rgba(42, 41, 39, 0.98), rgba(43, 66, 56, 0.97) 58%, rgba(70, 55, 66, 0.95)),
+    linear-gradient(90deg, transparent 0 23px, rgba(255, 243, 214, 0.07) 24px 25px, transparent 26px 100%);
 }
 
 .loginCard {
   width: min(430px, 100%);
-  background: #fff;
-  border: 1px solid rgba(255, 255, 255, 0.68);
+  background: var(--paper);
+  border: 1px solid rgba(255, 255, 243, 0.72);
   border-radius: 8px;
   padding: 30px;
   box-shadow: 0 28px 90px rgba(0, 0, 0, 0.32);
@@ -83,7 +89,8 @@ button {
   color: var(--muted);
   font-size: 11px;
   font-weight: 900;
-  letter-spacing: 0.12em;
+  font-family: var(--font-mono);
+  letter-spacing: 0;
 }
 
 .loginCard h1,
@@ -94,8 +101,10 @@ button {
 }
 
 .loginCard h1 {
+  font-family: var(--font-display);
   font-size: 34px;
   line-height: 1;
+  font-weight: 600;
 }
 
 .brand span,
@@ -120,10 +129,10 @@ input,
 select,
 textarea {
   width: 100%;
-  border: 1px solid #cfd9e2;
+  border: 1px solid #d8d0c4;
   border-radius: 8px;
   padding: 12px 13px;
-  background: #fff;
+  background: #fffdf8;
   color: var(--ink);
   transition: border-color 0.16s ease, box-shadow 0.16s ease, background 0.16s ease;
 }
@@ -131,9 +140,9 @@ textarea {
 input:focus,
 select:focus,
 textarea:focus {
-  outline: 3px solid #ccebd9;
+  outline: 3px solid #e4e1ba;
   border-color: var(--green);
-  box-shadow: 0 0 0 1px rgba(11, 147, 72, 0.15);
+  box-shadow: 0 0 0 1px rgba(43, 66, 56, 0.15);
 }
 
 textarea {
@@ -146,32 +155,32 @@ textarea {
   border: 1px solid var(--line);
   border-radius: 8px;
   padding: 10px 14px;
-  background: linear-gradient(180deg, #fff, #f8fafc);
+  background: linear-gradient(180deg, #fffdf8, #f6f1e6);
   color: var(--ink);
   font-weight: 800;
   display: inline-flex;
   align-items: center;
   justify-content: center;
   gap: 7px;
-  box-shadow: 0 1px 2px rgba(9, 33, 59, 0.04);
+  box-shadow: 0 1px 2px rgba(42, 41, 39, 0.04);
   transition: transform 0.14s ease, border-color 0.14s ease, box-shadow 0.14s ease, background 0.14s ease;
 }
 
 .btn:hover {
-  border-color: #b8c7d3;
+  border-color: #c5bcae;
   box-shadow: var(--shadow-sm);
   transform: translateY(-1px);
 }
 
 .btn.primary {
   border-color: var(--green);
-  background: linear-gradient(180deg, #11a657, var(--green));
+  background: linear-gradient(180deg, #385646, var(--green));
   color: #fff;
-  box-shadow: 0 8px 18px rgba(11, 147, 72, 0.22);
+  box-shadow: 0 10px 22px rgba(43, 66, 56, 0.24);
 }
 
 .btn.primary:hover {
-  background: linear-gradient(180deg, #0d994f, var(--green-dark));
+  background: linear-gradient(180deg, #314b3e, var(--green-dark));
 }
 
 .btn.block {
@@ -199,7 +208,7 @@ textarea {
 .hint {
   display: grid;
   gap: 4px;
-  background: #f4f7f9;
+  background: var(--surface);
   color: var(--muted);
 }
 
@@ -208,9 +217,9 @@ textarea {
 }
 
 .notice {
-  border: 1px solid #efb2b2;
-  background: #ffeded;
-  color: #982b2b;
+  border: 1px solid #ddb8bd;
+  background: #fff0f1;
+  color: var(--red);
 }
 
 .shell {
@@ -228,16 +237,17 @@ textarea {
   gap: 24px;
   padding: 28px 17px;
   background:
-    linear-gradient(180deg, #061b31 0%, #082640 55%, #062235 100%),
-    linear-gradient(90deg, rgba(255, 255, 255, 0.06), transparent);
+    linear-gradient(180deg, #2a2927 0%, #2b4238 54%, #1f342b 100%),
+    linear-gradient(90deg, rgba(255, 255, 243, 0.08), transparent);
   color: #fff;
-  border-right: 1px solid rgba(255, 255, 255, 0.08);
-  box-shadow: 10px 0 30px rgba(8, 33, 59, 0.16);
+  border-right: 1px solid rgba(255, 255, 243, 0.1);
+  box-shadow: 10px 0 30px rgba(42, 41, 39, 0.18);
 }
 
 .brand {
+  font-family: var(--font-display);
   font-size: 24px;
-  font-weight: 900;
+  font-weight: 600;
   padding: 14px 12px 12px;
   color: #fff;
 }
@@ -258,14 +268,15 @@ textarea {
   color: rgba(255, 255, 255, 0.86);
   text-align: left;
   font-weight: 750;
+  font-family: var(--font-sans);
   transition: background 0.16s ease, color 0.16s ease, transform 0.16s ease;
 }
 
 .nav button.active,
 .nav button:hover {
-  background: linear-gradient(180deg, #10a958, #0a9348);
+  background: linear-gradient(180deg, #b7b683, #788272);
   color: #fff;
-  box-shadow: 0 10px 22px rgba(4, 18, 32, 0.24);
+  box-shadow: 0 10px 22px rgba(18, 26, 22, 0.22);
   transform: translateX(2px);
 }
 
@@ -287,15 +298,17 @@ textarea {
   justify-content: space-between;
   gap: 16px;
   padding: 18px 28px;
-  background: rgba(255, 255, 255, 0.86);
+  background: rgba(255, 253, 247, 0.9);
   border-bottom: 1px solid var(--line);
   backdrop-filter: blur(10px);
-  box-shadow: 0 10px 28px rgba(9, 33, 59, 0.05);
+  box-shadow: 0 10px 28px rgba(42, 41, 39, 0.05);
 }
 
 .topbar h1 {
   margin: 0;
+  font-family: var(--font-display);
   font-size: 25px;
+  font-weight: 600;
 }
 
 .topbar p {
@@ -312,11 +325,12 @@ textarea {
 .pill {
   border-radius: 999px;
   padding: 8px 11px;
-  background: #e6f7ec;
-  border: 1px solid #c8ead5;
+  background: #eeecd0;
+  border: 1px solid #ddd9aa;
   color: var(--green-dark);
   font-size: 12px;
   font-weight: 900;
+  font-family: var(--font-mono);
 }
 
 .menuButton {
@@ -370,9 +384,11 @@ textarea {
 
 .agendaHead h2 {
   margin: 5px 0 0;
+  font-family: var(--font-display);
   font-size: 26px;
+  font-weight: 600;
   text-transform: capitalize;
-  color: #071d34;
+  color: var(--ink);
 }
 
 .week {
@@ -386,23 +402,23 @@ textarea {
   min-height: 76px;
   border: 1px solid var(--line);
   border-radius: 8px;
-  background: rgba(255, 255, 255, 0.9);
+  background: rgba(255, 253, 247, 0.92);
   text-align: left;
   padding: 12px;
-  box-shadow: 0 1px 2px rgba(9, 33, 59, 0.04);
+  box-shadow: 0 1px 2px rgba(42, 41, 39, 0.04);
   transition: transform 0.14s ease, border-color 0.14s ease, box-shadow 0.14s ease, background 0.14s ease;
 }
 
 .dayChip:hover {
-  border-color: #b9c8d4;
+  border-color: #c5bcae;
   box-shadow: var(--shadow-sm);
   transform: translateY(-1px);
 }
 
 .dayChip.active {
   border-color: var(--green);
-  background: linear-gradient(180deg, #f2fff7, #fff);
-  box-shadow: inset 0 0 0 1px var(--green), 0 12px 26px rgba(11, 147, 72, 0.13);
+  background: linear-gradient(180deg, #fffdf7, #f0e2dd);
+  box-shadow: inset 0 0 0 1px var(--green), 0 12px 26px rgba(43, 66, 56, 0.13);
 }
 
 .dayChip span,
@@ -419,7 +435,7 @@ textarea {
 .dailySchedule {
   display: grid;
   gap: 0;
-  filter: drop-shadow(0 14px 28px rgba(9, 33, 59, 0.08));
+  filter: drop-shadow(0 14px 28px rgba(42, 41, 39, 0.08));
 }
 
 .scheduleSummary {
@@ -430,20 +446,20 @@ textarea {
   align-items: center;
   justify-content: space-between;
   gap: 12px;
-  border: 1px solid #d7e1e9;
+  border: 1px solid var(--line);
   border-radius: 8px 8px 0 0;
   padding: 13px 15px;
-  background: rgba(255, 255, 255, 0.96);
+  background: rgba(255, 253, 247, 0.96);
   backdrop-filter: blur(10px);
-  color: #26384c;
+  color: var(--ink);
 }
 
 .scheduleList {
-  border: 1px solid #d7e1e9;
+  border: 1px solid var(--line);
   border-top: 0;
   border-radius: 0 0 8px 8px;
   overflow: hidden;
-  background: #fff;
+  background: var(--paper);
 }
 
 .scheduleRow {
@@ -463,9 +479,10 @@ textarea {
   border: 0;
   border-right: 1px solid var(--line);
   padding: 17px 6px;
-  background: #f5f8fa;
-  color: #436078;
+  background: #f3efe4;
+  color: var(--green);
   font-weight: 900;
+  font-family: var(--font-mono);
 }
 
 .scheduleRow.free .scheduleTime {
@@ -480,9 +497,9 @@ textarea {
 .freeSlot {
   width: 100%;
   min-height: 60px;
-  border: 1px dashed #b8c7d2;
+  border: 1px dashed #c8bfb2;
   border-radius: 8px;
-  background: linear-gradient(180deg, #fbfdfe, #f5f9fb);
+  background: linear-gradient(180deg, #fffdf8, #f7f4e8);
   color: var(--muted);
   text-align: left;
   padding: 11px 13px;
@@ -491,7 +508,7 @@ textarea {
 
 .freeSlot:not(:disabled):hover {
   border-color: var(--green);
-  background: #f2fff7;
+  background: #f0e2dd;
   transform: translateY(-1px);
 }
 
@@ -506,12 +523,12 @@ textarea {
 }
 
 .dailyTask {
-  border: 1px solid #d9e3eb;
-  border-left: 4px solid var(--cyan);
+  border: 1px solid var(--line);
+  border-left: 4px solid var(--mauve);
   border-radius: 8px;
-  background: #fff;
+  background: var(--paper);
   overflow: hidden;
-  box-shadow: 0 6px 18px rgba(9, 33, 59, 0.06);
+  box-shadow: 0 6px 18px rgba(42, 41, 39, 0.06);
 }
 
 .dailyTask + .dailyTask {
@@ -536,8 +553,9 @@ textarea {
 }
 
 .dailyTaskTime {
-  color: var(--cyan);
+  color: var(--plum);
   font-weight: 900;
+  font-family: var(--font-mono);
 }
 
 .dailyTaskMain {
@@ -560,7 +578,7 @@ textarea {
 .dailyTaskDetail {
   border-top: 1px solid var(--line);
   padding: 14px;
-  background: #fbfdfe;
+  background: #fbf7ee;
 }
 
 .dailyTaskDetail p {
@@ -575,10 +593,10 @@ textarea {
 }
 
 .dailyMeta span {
-  border: 1px solid #e3ebf1;
+  border: 1px solid #ebe4da;
   border-radius: 8px;
   padding: 10px;
-  background: #fff;
+  background: #fffdf8;
   color: var(--ink);
 }
 
@@ -610,8 +628,9 @@ textarea {
 }
 
 .taskTime {
-  color: var(--blue);
+  color: var(--plum);
   font-weight: 900;
+  font-family: var(--font-mono);
 }
 
 .task h3 {
@@ -630,28 +649,29 @@ textarea {
   width: max-content;
   border-radius: 999px;
   padding: 5px 9px;
-  background: #e9f5f7;
-  color: var(--cyan);
+  background: #eef0df;
+  color: var(--green);
   font-size: 12px;
   font-weight: 900;
-  border: 1px solid #cde5e9;
+  border: 1px solid #d8d8ad;
+  font-family: var(--font-mono);
 }
 
 .status.en-trabajo {
-  background: #fff1d8;
-  color: #9a5900;
+  background: #fff4d8;
+  color: #7b5c12;
 }
 
 .status.realizada {
-  background: #e8f7ee;
+  background: #edf3dd;
   color: var(--green-dark);
 }
 
 .empty {
-  border: 1px dashed #b9c5cf;
+  border: 1px dashed #c8bfb2;
   border-radius: 8px;
   padding: 34px;
-  background: #fff;
+  background: var(--paper);
   text-align: center;
   color: var(--muted);
 }
@@ -677,9 +697,9 @@ textarea {
 }
 
 .accordion {
-  border: 1px solid #d7e1e9;
+  border: 1px solid var(--line);
   border-radius: 8px;
-  background: #fff;
+  background: var(--paper);
   overflow: hidden;
   margin-bottom: 13px;
   box-shadow: var(--shadow-sm);
@@ -693,27 +713,27 @@ textarea {
   padding: 16px 17px;
   font-weight: 900;
   cursor: pointer;
-  color: #071d34;
+  color: var(--ink);
 }
 
 .accordionBody {
   border-top: 1px solid var(--line);
   padding: 2px 17px 17px;
-  background: #fbfdfe;
+  background: #fbf7ee;
 }
 
 .routeNotice {
   margin-top: 12px;
-  border: 1px solid #efd098;
+  border: 1px solid #ddd29b;
   border-radius: 8px;
   padding: 11px;
-  background: #fff5df;
-  color: #8a5b0b;
+  background: #fff7dc;
+  color: #725a18;
 }
 
 .routeNotice.success {
-  border-color: #b8e0c6;
-  background: #eaf8ef;
+  border-color: #d3d4a2;
+  background: #f1f2dc;
   color: var(--green-dark);
 }
 
@@ -723,10 +743,10 @@ textarea {
   align-items: center;
   justify-content: space-between;
   gap: 12px;
-  border: 1px dashed #b9c5cf;
+  border: 1px dashed #c8bfb2;
   border-radius: 8px;
   padding: 12px;
-  background: #f8fafb;
+  background: #fbf7ee;
   cursor: pointer;
 }
 
@@ -753,11 +773,11 @@ textarea {
   border: 1px solid var(--line);
   border-radius: 999px;
   padding: 7px 10px;
-  background: #fff;
+  background: #fffdf8;
   color: var(--muted);
   font-size: 12px;
   font-weight: 800;
-  box-shadow: 0 1px 2px rgba(9, 33, 59, 0.04);
+  box-shadow: 0 1px 2px rgba(42, 41, 39, 0.04);
 }
 
 .summaryCard {
@@ -767,7 +787,7 @@ textarea {
   border: 1px solid var(--line);
   border-radius: 8px;
   padding: 18px;
-  background: linear-gradient(180deg, #ffffff, #f8fbfd);
+  background: linear-gradient(180deg, #fffdf8, #f7f4e8);
   box-shadow: var(--shadow-sm);
 }
 
@@ -802,7 +822,7 @@ textarea {
 
 .record h3 {
   margin: 0 0 4px;
-  color: #071d34;
+  color: var(--ink);
 }
 
 .record p {
@@ -846,7 +866,7 @@ textarea {
   border: 1px solid var(--line);
   border-radius: 8px;
   padding: 10px;
-  background: #f8fafb;
+  background: #fbf7ee;
   color: var(--muted);
 }
 
@@ -856,7 +876,7 @@ textarea {
   border: 1px solid var(--line);
   border-radius: 8px;
   padding: 12px;
-  background: #f8fafb;
+  background: #fbf7ee;
 }
 
 .accountBox small {
@@ -870,13 +890,13 @@ textarea {
   gap: 10px;
   border-radius: 8px;
   padding: 8px;
-  background: #fff;
+  background: #fffdf8;
 }
 
 .documentItem a {
   min-width: 0;
   overflow: hidden;
-  color: var(--blue);
+  color: var(--plum);
   font-weight: 800;
   text-overflow: ellipsis;
   white-space: nowrap;
@@ -896,7 +916,7 @@ textarea {
   border: 1px solid var(--line);
   border-radius: 8px;
   padding: 12px;
-  background: #f8fafb;
+  background: #fbf7ee;
 }
 
 .docActions {
@@ -911,7 +931,7 @@ textarea {
 .linkUpload {
   border: 0;
   background: transparent;
-  color: var(--green-dark);
+  color: var(--plum);
   font-size: 12px;
   font-weight: 900;
   text-decoration: none;
@@ -954,7 +974,7 @@ textarea {
   transition: 0.22s;
   border-radius: 8px;
   padding: 13px 16px;
-  background: #071d34;
+  background: var(--green);
   color: #fff;
   font-weight: 800;
   box-shadow: var(--shadow-md);
@@ -979,10 +999,10 @@ textarea {
   grid-template-columns: 44px minmax(0, 1fr) auto auto;
   align-items: center;
   gap: 10px;
-  border: 1px solid rgba(198, 218, 226, 0.92);
+  border: 1px solid rgba(228, 221, 211, 0.95);
   border-radius: 8px;
   padding: 12px;
-  background: rgba(255, 255, 255, 0.96);
+  background: rgba(255, 253, 247, 0.96);
   box-shadow: var(--shadow-md);
   backdrop-filter: blur(14px);
 }
@@ -993,7 +1013,7 @@ textarea {
   display: grid;
   place-items: center;
   border-radius: 8px;
-  background: #e6f7ec;
+  background: #eeecd0;
   color: var(--green-dark);
 }
 
@@ -1007,7 +1027,7 @@ textarea {
 }
 
 .installCopy b {
-  color: #071d34;
+  color: var(--ink);
 }
 
 .installCopy p {
