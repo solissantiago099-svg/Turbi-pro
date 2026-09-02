@@ -1,13 +1,12 @@
 "use client";
 
 import { useEffect, useMemo, useRef, useState } from "react";
-import { CalendarDays, ClipboardList, Download, Edit3, LogOut, Menu, Plus, Route, Settings, Truck, UserPlus, Users, X } from "lucide-react";
+import { CalendarDays, Download, Edit3, LogOut, Menu, Plus, Route, Settings, Truck, UserPlus, Users, X } from "lucide-react";
 
 const views = [
   { id: "agenda", label: "Agenda", subtitle: "Planificacion diaria", icon: CalendarDays, roles: ["admin", "usuario"] },
   { id: "ruta", label: "Mi ruta", subtitle: "Trabajo del chofer", icon: Route, roles: ["admin", "chofer"] },
   { id: "nueva", label: "Nueva tarea", subtitle: "Carga rapida", icon: Plus, roles: ["admin", "usuario"] },
-  { id: "supervision", label: "Supervision", subtitle: "Estado operativo", icon: ClipboardList, roles: ["admin", "usuario"] },
   { id: "vehiculos", label: "Vehiculos", subtitle: "Flota y documentacion", icon: Truck, roles: ["admin"] },
   { id: "choferes", label: "Choferes", subtitle: "Equipo activo", icon: Users, roles: ["admin"] },
   { id: "configuracion", label: "Configuracion", subtitle: "Usuarios y respaldo", icon: Settings, roles: ["admin"] },
@@ -654,7 +653,6 @@ export default function Home() {
             />
           )}
 
-          {view === "supervision" && <Supervision db={db} />}
           {view === "vehiculos" && <Records items={db.vehicles} type="vehicle" onSave={saveVehicle} />}
           {view === "choferes" && <Records items={db.drivers} type="driver" users={users} onSave={saveDriver} />}
           {view === "configuracion" && <SettingsPanel user={user} users={users} db={db} token={token} revision={revision} onUsers={setUsers} onUser={setUser} onNotify={notify} />}
@@ -1033,23 +1031,6 @@ function QuickAddresses({ onPick }) {
         </button>
       ))}
     </div>
-  );
-}
-
-function Supervision({ db }) {
-  return (
-    <section className="grid">
-      {db.drivers.map((driver) => {
-        const assigned = db.tasks.filter((task) => Number(task.driverId) === Number(driver.id) && task.date === localISO());
-        return (
-          <article className="card" key={driver.id}>
-            <span className="eyebrow">CHOFER</span>
-            <h2>{driver.name}</h2>
-            <p>{assigned.length} tareas asignadas hoy</p>
-          </article>
-        );
-      })}
-    </section>
   );
 }
 
