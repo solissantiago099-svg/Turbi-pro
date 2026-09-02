@@ -4,8 +4,8 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import { CalendarDays, ClipboardList, Download, Edit3, LogOut, Menu, Plus, Route, Settings, Truck, UserPlus, Users, X } from "lucide-react";
 
 const views = [
-  { id: "agenda", label: "Agenda", subtitle: "Planificacion diaria", icon: CalendarDays },
-  { id: "ruta", label: "Mi ruta", subtitle: "Trabajo del chofer", icon: Route },
+  { id: "agenda", label: "Agenda", subtitle: "Planificacion diaria", icon: CalendarDays, roles: ["admin", "usuario"] },
+  { id: "ruta", label: "Mi ruta", subtitle: "Trabajo del chofer", icon: Route, roles: ["admin", "chofer"] },
   { id: "nueva", label: "Nueva tarea", subtitle: "Carga rapida", icon: Plus, roles: ["admin", "usuario"] },
   { id: "supervision", label: "Supervision", subtitle: "Estado operativo", icon: ClipboardList, roles: ["admin", "usuario"] },
   { id: "vehiculos", label: "Vehiculos", subtitle: "Flota y documentacion", icon: Truck, roles: ["admin"] },
@@ -192,8 +192,9 @@ export default function Home() {
   const [taskPrefill, setTaskPrefill] = useState({ date: localISO(), time: "" });
   const [editingTask, setEditingTask] = useState(null);
 
-  const currentView = views.find((item) => item.id === view) || views[0];
   const currentRole = normalizedRole(user?.role);
+  const visibleViews = useMemo(() => views.filter((item) => canAccessView(currentRole, item)), [currentRole]);
+  const currentView = visibleViews.find((item) => item.id === view) || visibleViews[0] || views[0];
   const isAdmin = currentRole === "admin";
   const canManageTasks = ["admin", "usuario"].includes(currentRole);
   const driverId = user?.currentDriverId || db.settings?.currentDriverId || 1;
@@ -295,6 +296,12 @@ export default function Home() {
     const timer = window.setInterval(() => loadState(token, true).catch(() => null), 10000);
     return () => window.clearInterval(timer);
   }, [token, user]);
+
+  useEffect(() => {
+    if (!user || canAccessView(currentRole, currentView)) return;
+    const fallback = visibleViews[0]?.id || (currentRole === "chofer" ? "ruta" : "agenda");
+    setView(fallback);
+  }, [currentRole, currentView, user, visibleViews]);
 
   useEffect(() => {
     if (!menuOpen) return undefined;
@@ -549,14 +556,12 @@ export default function Home() {
           TAMIZ <span>RUTAS</span>
         </div>
         <nav className="nav" aria-label="Navegacion principal">
-          {views.map((item) => {
+          {visibleViews.map((item) => {
             const Icon = item.icon;
-            const disabled = !canAccessView(user?.role, item);
             return (
               <button
                 key={item.id}
                 className={view === item.id ? "active" : ""}
-                disabled={disabled}
                 onClick={() => {
                   setView(item.id);
                   setMenuOpen(false);
