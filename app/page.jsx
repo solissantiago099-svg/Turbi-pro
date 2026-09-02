@@ -1353,6 +1353,7 @@ function SettingsPanel({ user, users, db, token, revision, onUsers, onUser, onNo
       {editingUser ? (
         <UserForm
           user={editingUser}
+          drivers={db.drivers}
           onCancel={() => setEditingUser(null)}
           onSave={saveUser}
         />
@@ -1373,6 +1374,9 @@ function SettingsPanel({ user, users, db, token, revision, onUsers, onUser, onNo
             <div>
               <h3>{item.name || item.username}</h3>
               <p>{item.username} - {roleLabel(item.role)}</p>
+              {normalizedRole(item.role) === "chofer" ? (
+                <small>{db.drivers.find((driver) => Number(driver.id) === Number(item.currentDriverId))?.name || "Sin chofer asociado"}</small>
+              ) : null}
             </div>
             <div className="recordActions">
               <span className="status">{roleLabel(item.role)}</span>
@@ -1385,11 +1389,12 @@ function SettingsPanel({ user, users, db, token, revision, onUsers, onUser, onNo
   );
 }
 
-function UserForm({ user, onCancel, onSave }) {
+function UserForm({ user, drivers = [], onCancel, onSave }) {
   const [form, setForm] = useState({
     username: user.username || "",
     name: user.name || "",
     role: normalizedRole(user.role || "usuario"),
+    currentDriverId: user.currentDriverId || "",
     password: "",
   });
   const isEditing = Boolean(user.id);
@@ -1409,6 +1414,7 @@ function UserForm({ user, onCancel, onSave }) {
       username: form.username.trim(),
       name: form.name.trim(),
       role: form.role,
+      currentDriverId: form.role === "chofer" ? form.currentDriverId : null,
       password: form.password,
     });
   }
@@ -1426,9 +1432,30 @@ function UserForm({ user, onCancel, onSave }) {
         <div><label>Nombre</label><input value={form.name} onChange={(event) => update("name", event.target.value)} required /></div>
       </div>
       <div className="row">
-        <div><label>Rol</label><select value={form.role} onChange={(event) => update("role", event.target.value)}><option value="admin">Admin</option><option value="usuario">Usuario</option><option value="chofer">Chofer</option></select></div>
+        <div>
+          <label>Rol</label>
+          <select
+            value={form.role}
+            onChange={(event) => setForm((current) => ({ ...current, role: event.target.value, currentDriverId: event.target.value === "chofer" ? current.currentDriverId : "" }))}
+          >
+            <option value="admin">Admin</option>
+            <option value="usuario">Usuario</option>
+            <option value="chofer">Chofer</option>
+          </select>
+        </div>
         <div><label>{isEditing ? "Nueva contrasena (opcional)" : "Contrasena inicial"}</label><input type="password" value={form.password} onChange={(event) => update("password", event.target.value)} required={!isEditing} /></div>
       </div>
+      {form.role === "chofer" ? (
+        <div>
+          <label>Chofer asociado</label>
+          <select value={form.currentDriverId} onChange={(event) => update("currentDriverId", event.target.value)} required>
+            <option value="">Seleccionar chofer</option>
+            {drivers.map((driver) => (
+              <option key={driver.id} value={driver.id}>{driver.name}</option>
+            ))}
+          </select>
+        </div>
+      ) : null}
       <div className="actions">
         <button className="btn" type="button" onClick={onCancel}>Cancelar</button>
         <button className="btn primary">Guardar usuario</button>
