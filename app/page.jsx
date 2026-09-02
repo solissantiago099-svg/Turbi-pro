@@ -551,9 +551,6 @@ export default function Home() {
         onTouchEnd={endMenuSwipe}
         onTouchCancel={endMenuSwipe}
       >
-        <div className="brand">
-          TAMIZ <span>RUTAS</span>
-        </div>
         <nav className="nav" aria-label="Navegacion principal">
           {visibleViews.map((item) => {
             const Icon = item.icon;
