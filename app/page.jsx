@@ -691,26 +691,43 @@ function Kpis({ tasks, vehicles, drivers }) {
 function TaskList({ tasks, db, onStatus, canOperate }) {
   if (!tasks.length) return <div className="empty">No hay tareas para este dia.</div>;
   return (
-    <section className="schedule">
+    <section className="routeTasks">
       {tasks.map((task) => {
         const driver = db.drivers.find((item) => Number(item.id) === Number(task.driverId));
         const vehicle = db.vehicles.find((item) => Number(item.id) === Number(task.vehicleId));
+        const stops = (task.stops || []).map((stop) => (typeof stop === "string" ? stop : stop.address)).filter(Boolean);
+        const destination = task.destination || stops.at(-1) || "Sin destino final";
         return (
-          <article className="task" key={task.id}>
-            <span className="taskTime">{task.start}</span>
-            <div>
-              <h3>{task.title || task.description}</h3>
-              <p>{task.origin} -> {task.destination}</p>
-              <p>{driver?.name || "Sin chofer"} - {vehicle ? `${vehicle.name} ${vehicle.plate}` : "Sin vehiculo"}</p>
-              <p>{task.merchandise || "Mercaderia sin especificar"} {task.quantities ? `- ${task.quantities}` : ""}</p>
-            </div>
-            <div>
+          <article className="driverTaskCard" key={task.id}>
+            <header className="driverTaskHeader">
+              <span className="driverTaskTime">{task.start || "--:--"}</span>
               <span className={`status ${task.status}`}>{statusText[task.status] || task.status}</span>
+            </header>
+            <section className="driverTaskBlock highlight">
+              <span className="eyebrow">ARRANCA</span>
+              <h3>{task.origin || "Sin origen cargado"}</h3>
+              <p>{vehicle ? `${vehicle.name} - ${vehicle.plate}` : "Sin vehiculo asignado"}</p>
+            </section>
+            <section className="driverTaskBlock">
+              <span className="eyebrow">TAREA</span>
+              <h4>{task.title || task.description || "Tarea sin titulo"}</h4>
+              <p>{task.description || task.observations || "Sin descripcion cargada."}</p>
+              <p>{task.merchandise || "Mercaderia sin especificar"}{task.quantities ? ` - ${task.quantities}` : ""}</p>
+              <p>{driver?.name || "Sin chofer asignado"}</p>
+            </section>
+            <section className="driverTaskBlock">
+              <span className="eyebrow">TERMINA</span>
+              <h4>{destination}</h4>
+              {stops.length ? <p>Paradas: {stops.join(" / ")}</p> : null}
+              <p>{task.assigned || task.duration || "Sin calcular"} min{task.distance ? ` - ${task.distance} km` : ""}</p>
+            </section>
+            <div className="driverTaskActions">
+              <a className="btn primary" href={taskGoogleMapsURL(task)} target="_blank" rel="noreferrer">Abrir Maps</a>
               {canOperate ? (
-                <div className="actions">
+                <>
                   {task.status !== "en-trabajo" ? <button className="btn" onClick={() => onStatus(task, "en-trabajo")}>Iniciar</button> : null}
                   {task.status !== "realizada" ? <button className="btn primary" onClick={() => onStatus(task, "realizada")}>Finalizar</button> : null}
-                </div>
+                </>
               ) : null}
             </div>
           </article>

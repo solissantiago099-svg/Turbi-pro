@@ -625,6 +625,84 @@ textarea {
   text-decoration: none;
 }
 
+.routeTasks {
+  display: grid;
+  gap: 14px;
+}
+
+.driverTaskCard {
+  display: grid;
+  gap: 12px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  padding: 15px;
+  background: var(--paper);
+  box-shadow: var(--shadow-sm);
+}
+
+.driverTaskHeader {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+}
+
+.driverTaskTime {
+  color: var(--plum);
+  font-size: 18px;
+  font-weight: 900;
+  font-family: var(--font-mono);
+}
+
+.driverTaskBlock {
+  border: 1px solid #ebe4da;
+  border-radius: 8px;
+  padding: 12px;
+  background: #fffdf8;
+}
+
+.driverTaskBlock.highlight {
+  border-color: #d4d0a5;
+  background: #f4f2dd;
+}
+
+.driverTaskBlock h3,
+.driverTaskBlock h4,
+.driverTaskBlock p {
+  margin: 0;
+}
+
+.driverTaskBlock h3,
+.driverTaskBlock h4 {
+  margin-top: 6px;
+  color: var(--ink);
+  line-height: 1.25;
+}
+
+.driverTaskBlock h3 {
+  font-size: 17px;
+}
+
+.driverTaskBlock h4 {
+  font-size: 16px;
+}
+
+.driverTaskBlock p {
+  margin-top: 7px;
+  color: var(--muted);
+  line-height: 1.45;
+}
+
+.driverTaskActions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 9px;
+}
+
+.driverTaskActions a {
+  text-decoration: none;
+}
+
 .task {
   display: grid;
   grid-template-columns: 78px minmax(0, 1fr) auto;
@@ -1360,12 +1438,47 @@ textarea {
     max-width: 170px;
   }
 
+  .routeTasks {
+    gap: 12px;
+  }
+
+  .driverTaskCard {
+    padding: 12px;
+    gap: 10px;
+  }
+
+  .driverTaskHeader {
+    align-items: flex-start;
+  }
+
+  .driverTaskTime {
+    font-size: 17px;
+  }
+
+  .driverTaskBlock {
+    padding: 11px;
+  }
+
+  .driverTaskBlock h3 {
+    font-size: 16px;
+  }
+
+  .driverTaskActions {
+    display: grid;
+    grid-template-columns: 1fr;
+  }
+
+  .driverTaskActions .btn {
+    width: 100%;
+    min-height: 46px;
+  }
+
   .task {
-    grid-template-columns: 58px minmax(0, 1fr);
+    grid-template-columns: 1fr;
   }
 
   .task .status {
-    grid-column: 2;
+    grid-column: auto;
   }
 
   .actions {
