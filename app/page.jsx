@@ -842,6 +842,12 @@ function NewTaskForm({ db, prefill, initialTask = null, currentDriverId, onCance
   const [calculating, setCalculating] = useState(false);
   const [pdf, setPdf] = useState(null);
   const isEditing = Boolean(initialTask);
+  const formResetKey = [
+    initialTask?.id || "new",
+    prefill.date || "",
+    prefill.time || "",
+    currentDriverId || "",
+  ].join("|");
 
   useEffect(() => {
     setForm(taskToForm(initialTask, prefill, currentDriverId, db));
@@ -851,7 +857,7 @@ function NewTaskForm({ db, prefill, initialTask = null, currentDriverId, onCance
       distance: initialTask?.distance || "",
       coordinates: initialTask?.routeCoordinates || [],
     });
-  }, [initialTask, prefill, currentDriverId, db]);
+  }, [formResetKey]);
 
   useEffect(() => {
     const addresses = [form.origin, ...form.stops.split("\n").map((value) => value.trim()).filter(Boolean), form.destination].filter(Boolean);
