@@ -192,6 +192,12 @@ textarea {
   background: transparent;
 }
 
+.btn.compact {
+  min-height: 34px;
+  padding: 7px 11px;
+  font-size: 13px;
+}
+
 .btn:disabled {
   opacity: 0.55;
   cursor: not-allowed;
@@ -778,6 +784,157 @@ textarea {
   font-size: 12px;
   font-weight: 800;
   box-shadow: 0 1px 2px rgba(42, 41, 39, 0.04);
+}
+
+.addressSuggest {
+  position: relative;
+}
+
+.addressInputWrap {
+  position: relative;
+  display: flex;
+  align-items: center;
+}
+
+.addressInputWrap svg {
+  position: absolute;
+  left: 13px;
+  color: var(--muted);
+  pointer-events: none;
+}
+
+.addressInputWrap input {
+  padding-left: 40px;
+}
+
+.addressMenu {
+  position: absolute;
+  z-index: 30;
+  top: calc(100% + 7px);
+  left: 0;
+  right: 0;
+  overflow: hidden;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: var(--paper);
+  box-shadow: var(--shadow-md);
+}
+
+.addressOption {
+  width: 100%;
+  min-height: 46px;
+  display: grid;
+  grid-template-columns: 22px minmax(0, 1fr);
+  gap: 10px;
+  align-items: center;
+  border: 0;
+  border-top: 1px solid #eee7dc;
+  padding: 10px 13px;
+  background: transparent;
+  color: var(--ink);
+  text-align: left;
+}
+
+.addressOption:first-child {
+  border-top: 0;
+}
+
+.addressOption:hover {
+  background: #f7f4e8;
+}
+
+.addressOption svg {
+  color: var(--muted);
+}
+
+.addressOption span {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.addressOption.muted {
+  display: block;
+  color: var(--muted);
+  font-weight: 800;
+}
+
+.stopsHeader {
+  display: flex;
+  align-items: end;
+  justify-content: space-between;
+  gap: 10px;
+  margin-top: 14px;
+}
+
+.stopsHeader label {
+  margin-bottom: 0;
+}
+
+.stopList {
+  display: grid;
+  gap: 9px;
+  margin-top: 8px;
+}
+
+.stopRow {
+  display: grid;
+  grid-template-columns: 30px minmax(0, 1fr) 42px;
+  gap: 8px;
+  align-items: center;
+}
+
+.stopIndex {
+  width: 30px;
+  height: 30px;
+  display: grid;
+  place-items: center;
+  border: 1px solid var(--line);
+  border-radius: 999px;
+  background: #fffdf8;
+  color: var(--green);
+  font-weight: 900;
+  font-family: var(--font-mono);
+}
+
+.addStopEmpty {
+  width: 100%;
+  min-height: 48px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  border: 1px dashed #c8bfb2;
+  border-radius: 8px;
+  margin-top: 8px;
+  background: linear-gradient(180deg, #fffdf8, #f7f4e8);
+  color: var(--green);
+  font-weight: 900;
+}
+
+.addStopEmpty:hover {
+  border-color: var(--green);
+  background: #f0e2dd;
+}
+
+.iconBtn {
+  width: 42px;
+  height: 42px;
+  display: inline-grid;
+  place-items: center;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: #fffdf8;
+  color: var(--ink);
+}
+
+.iconBtn:hover {
+  border-color: #c5bcae;
+  background: #f7f4e8;
+}
+
+.iconBtn.danger {
+  color: var(--red);
 }
 
 .summaryCard {

@@ -75,9 +75,10 @@ function assetResponse(pathname) {
 
 async function geocode(requestUrl) {
   const query = requestUrl.searchParams.get("q") || "";
+  const limit = Math.min(6, Math.max(1, Number(requestUrl.searchParams.get("limit") || 1)));
   const upstream = new URL("https://nominatim.openstreetmap.org/search");
   upstream.searchParams.set("format", "jsonv2");
-  upstream.searchParams.set("limit", "1");
+  upstream.searchParams.set("limit", String(limit));
   upstream.searchParams.set("countrycodes", "ar");
   upstream.searchParams.set("accept-language", "es");
   upstream.searchParams.set("q", query);

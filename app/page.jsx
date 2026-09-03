@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useMemo, useRef, useState } from "react";
-import { CalendarDays, Download, Edit3, LogOut, Menu, Plus, Route, Settings, Truck, UserPlus, Users, X } from "lucide-react";
+import { CalendarDays, Download, Edit3, LogOut, MapPin, Menu, Plus, Route, Search, Settings, Trash2, Truck, UserPlus, Users, X } from "lucide-react";
 
 const views = [
   { id: "agenda", label: "Agenda", subtitle: "Planificacion diaria", icon: CalendarDays, roles: ["admin", "usuario"] },
@@ -826,7 +826,7 @@ function taskToForm(task, prefill, currentDriverId, db) {
     assigned: task?.assigned ? String(task.assigned) : task?.duration ? String(task.duration) : "",
     duration: task?.duration ? String(task.duration) : task?.assigned ? String(task.assigned) : "",
     origin: task?.origin || "",
-    stops: Array.isArray(task?.stops) ? task.stops.map((stop) => (typeof stop === "string" ? stop : stop.address)).filter(Boolean).join("\n") : "",
+    stops: Array.isArray(task?.stops) ? task.stops.map((stop) => (typeof stop === "string" ? stop : stop.address)).filter(Boolean) : [],
     destination: task?.destination || "",
     contact: task?.contact || "",
     phone: task?.phone || "",
@@ -860,7 +860,7 @@ function NewTaskForm({ db, prefill, initialTask = null, currentDriverId, onCance
   }, [formResetKey]);
 
   useEffect(() => {
-    const addresses = [form.origin, ...form.stops.split("\n").map((value) => value.trim()).filter(Boolean), form.destination].filter(Boolean);
+    const addresses = [form.origin, ...form.stops.map((value) => value.trim()).filter(Boolean), form.destination].filter(Boolean);
     if (addresses.length < 2) {
       setRouteInfo({ status: "Cargá origen y al menos un destino/parada para calcular OSRM.", distance: "", coordinates: [] });
       setForm((current) => ({ ...current, assigned: "", duration: "" }));
@@ -872,6 +872,18 @@ function NewTaskForm({ db, prefill, initialTask = null, currentDriverId, onCance
 
   function update(name, value) {
     setForm((current) => ({ ...current, [name]: value }));
+  }
+
+  function addStop() {
+    setForm((current) => ({ ...current, stops: [...current.stops, ""] }));
+  }
+
+  function updateStop(index, value) {
+    setForm((current) => ({ ...current, stops: current.stops.map((stop, stopIndex) => stopIndex === index ? value : stop) }));
+  }
+
+  function removeStop(index) {
+    setForm((current) => ({ ...current, stops: current.stops.filter((_, stopIndex) => stopIndex !== index) }));
   }
 
   async function geocodeAddress(address) {
@@ -939,7 +951,7 @@ function NewTaskForm({ db, prefill, initialTask = null, currentDriverId, onCance
       duration: Number(form.duration),
       origin: form.origin,
       destination: form.destination,
-      stops: form.stops.split("\n").map((value) => value.trim()).filter(Boolean),
+      stops: form.stops.map((value) => value.trim()).filter(Boolean),
       contact: form.contact,
       phone: form.phone,
       assignedBy: form.assignedBy,
@@ -986,14 +998,31 @@ function NewTaskForm({ db, prefill, initialTask = null, currentDriverId, onCance
         </Accordion>
 
         <Accordion title="3. Origen y destino">
-          <datalist id="frequent-addresses">{frequentAddresses.map((address) => <option key={address} value={address} />)}</datalist>
           <label>Direccion de origen</label>
-          <input value={form.origin} list="frequent-addresses" autoComplete="off" onChange={(event) => update("origin", event.target.value)} required />
+          <AddressSuggest value={form.origin} onChange={(value) => update("origin", value)} required />
           <QuickAddresses onPick={(value) => update("origin", value)} />
-          <label>Paradas (una direccion por linea)</label>
-          <textarea value={form.stops} onChange={(event) => update("stops", event.target.value)} />
+          <div className="stopsHeader">
+            <label>Paradas <small>(opcional)</small></label>
+            <button className="btn compact" type="button" onClick={addStop}><Plus size={15} /> Agregar parada</button>
+          </div>
+          {form.stops.length ? (
+            <div className="stopList">
+              {form.stops.map((stop, index) => (
+                <div className="stopRow" key={index}>
+                  <span className="stopIndex">{index + 1}</span>
+                  <AddressSuggest value={stop} onChange={(value) => updateStop(index, value)} placeholder="Direccion de la parada" />
+                  <button className="iconBtn danger" type="button" onClick={() => removeStop(index)} aria-label="Quitar parada"><Trash2 size={16} /></button>
+                </div>
+              ))}
+            </div>
+          ) : (
+            <button className="addStopEmpty" type="button" onClick={addStop}>
+              <Plus size={18} />
+              Agregar una parada intermedia
+            </button>
+          )}
           <label>Direccion de destino <small>(opcional)</small></label>
-          <input value={form.destination} list="frequent-addresses" autoComplete="off" placeholder="Podes dejarla vacia y usar varias paradas" onChange={(event) => update("destination", event.target.value)} />
+          <AddressSuggest value={form.destination} onChange={(value) => update("destination", value)} placeholder="Podes dejarla vacia y usar varias paradas" />
           <QuickAddresses onPick={(value) => update("destination", value)} />
         </Accordion>
 
@@ -1021,6 +1050,81 @@ function NewTaskForm({ db, prefill, initialTask = null, currentDriverId, onCance
         <p>{form.origin || "Origen"} -> {previewDestination}</p>
         <p>{form.start || "-"} - {form.duration || "sin calcular"} min{routeInfo.distance ? ` - ${routeInfo.distance} km` : ""}</p>
       </aside>
+    </div>
+  );
+}
+
+function AddressSuggest({ value, onChange, placeholder = "", required = false }) {
+  const [suggestions, setSuggestions] = useState([]);
+  const [active, setActive] = useState(false);
+  const [loading, setLoading] = useState(false);
+
+  useEffect(() => {
+    const query = value.trim();
+    const localMatches = frequentAddresses.filter((address) => address.toLowerCase().includes(query.toLowerCase()));
+    if (query.length < 3) {
+      setSuggestions(query ? localMatches : []);
+      setLoading(false);
+      return undefined;
+    }
+
+    const controller = new AbortController();
+    const timer = window.setTimeout(async () => {
+      setLoading(true);
+      try {
+        const response = await fetch(`/api/geocode?q=${encodeURIComponent(query)}&limit=6`, { signal: controller.signal });
+        if (!response.ok) throw new Error("No se pudieron buscar direcciones");
+        const results = await response.json();
+        const remoteMatches = results.map((result) => result.display_name || result.name).filter(Boolean);
+        setSuggestions([...new Set([...localMatches, ...remoteMatches])].slice(0, 6));
+      } catch (error) {
+        if (error.name !== "AbortError") setSuggestions(localMatches);
+      } finally {
+        if (!controller.signal.aborted) setLoading(false);
+      }
+    }, 350);
+
+    return () => {
+      controller.abort();
+      window.clearTimeout(timer);
+    };
+  }, [value]);
+
+  function pick(address) {
+    onChange(address);
+    setActive(false);
+  }
+
+  const showPanel = active && (loading || suggestions.length > 0);
+
+  return (
+    <div className="addressSuggest">
+      <div className="addressInputWrap">
+        <Search size={17} />
+        <input
+          value={value}
+          required={required}
+          autoComplete="off"
+          placeholder={placeholder}
+          onFocus={() => setActive(true)}
+          onChange={(event) => {
+            onChange(event.target.value);
+            setActive(true);
+          }}
+          onBlur={() => window.setTimeout(() => setActive(false), 150)}
+        />
+      </div>
+      {showPanel ? (
+        <div className="addressMenu">
+          {loading ? <div className="addressOption muted">Buscando direcciones...</div> : null}
+          {suggestions.map((address) => (
+            <button className="addressOption" type="button" key={address} onMouseDown={(event) => event.preventDefault()} onClick={() => pick(address)}>
+              <MapPin size={16} />
+              <span>{address}</span>
+            </button>
+          ))}
+        </div>
+      ) : null}
     </div>
   );
 }
