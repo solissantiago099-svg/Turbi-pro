@@ -103,6 +103,14 @@ let databaseReady;
 function normalizedRole(role) {
   return role === "supervisor" ? "admin" : role || "chofer";
 }
+function isScheduleOnlyChange(previousTask, nextTask, user) {
+  const role = normalizedRole(user?.role);
+  if (!["admin", "chofer"].includes(role) || previousTask.start || !nextTask.start) return false;
+  if (role === "chofer" && Number(previousTask.driverId) !== Number(user.currentDriverId)) return false;
+  const { date: previousDate, start: previousStart, status: previousStatus, updatedAt: previousUpdatedAt, ...previousContent } = previousTask;
+  const { date: nextDate, start: nextStart, status: nextStatus, updatedAt: nextUpdatedAt, ...nextContent } = nextTask;
+  return JSON.stringify(previousContent) === JSON.stringify(nextContent);
+}
 
 function isAdmin(user) {
   return normalizedRole(user?.role) === "admin";
@@ -294,16 +302,43 @@ async function writeState(request, env) {
   if (!payload || typeof payload !== "object" || !payload.data || !Array.isArray(payload.data.tasks) || !Array.isArray(payload.data.vehicles) || !Array.isArray(payload.data.drivers)) {
     return Response.json({ error: "Estado invalido" }, { status: 400 });
   }
-  const row = await env.DB.prepare("SELECT revision FROM app_state WHERE key = ?").bind("default").first();
+  const row = await env.DB.prepare("SELECT value, revision FROM app_state WHERE key = ?").bind("default").first();
   const currentRevision = row?.revision || 0;
   if (row && Number(payload.revision || 0) !== currentRevision) {
     const current = await env.DB.prepare("SELECT value, revision, updated_at AS updatedAt, updated_by AS updatedBy FROM app_state WHERE key = ?").bind("default").first();
     return Response.json({ error: "version-conflict", data: JSON.parse(current.value), revision: current.revision, updatedAt: current.updatedAt, updatedBy: current.updatedBy }, { status: 409 });
   }
+  const previousData = row?.value ? JSON.parse(row.value) : null;
+  const nextData = structuredClone(payload.data);
+  if (previousData?.tasks) {
+    const previousTasks = new Map(previousData.tasks.map(task => [String(task.id), task]));
+    for (const nextTask of nextData.tasks) {
+      const previousTask = previousTasks.get(String(nextTask.id));
+      if (!previousTask) {
+        nextTask.assignedByUserId = user.id;
+        nextTask.assignedByUserName = user.name || user.username || user.email || "Usuario";
+        continue;
+      }
+      const { status: previousStatus, ...previousContent } = previousTask;
+      const { status: nextStatus, ...nextContent } = nextTask;
+      if (JSON.stringify(previousContent) !== JSON.stringify(nextContent)) {
+        if (!isScheduleOnlyChange(previousTask, nextTask, user) && (!previousTask.assignedByUserId || String(previousTask.assignedByUserId) !== String(user.id))) {
+          return Response.json({ error: "Solo puede editar la tarea el usuario que la asigno." }, { status: 403 });
+        }
+        nextTask.assignedByUserId = previousTask.assignedByUserId;
+        nextTask.assignedByUserName = previousTask.assignedByUserName;
+      }
+    }
+  } else {
+    for (const nextTask of nextData.tasks) {
+      nextTask.assignedByUserId = user.id;
+      nextTask.assignedByUserName = user.name || user.username || user.email || "Usuario";
+    }
+  }
   const nextRevision = currentRevision + 1;
   const now = new Date().toISOString();
   await env.DB.prepare("INSERT INTO app_state (key, value, revision, updated_at, updated_by) VALUES (?, ?, ?, ?, ?) ON CONFLICT(key) DO UPDATE SET value = excluded.value, revision = excluded.revision, updated_at = excluded.updated_at, updated_by = excluded.updated_by")
-    .bind("default", JSON.stringify(payload.data), nextRevision, now, user.id)
+    .bind("default", JSON.stringify(nextData), nextRevision, now, user.id)
     .run();
   await audit(env, user, payload.action || "save-state", "app_state", "default", { revision: nextRevision });
   return Response.json({ ok: true, revision: nextRevision, updatedAt: now, updatedBy: user.id, user });

@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useMemo, useRef, useState } from "react";
-import { CalendarDays, Download, Edit3, LogOut, MapPin, Menu, Plus, Route, Search, Settings, Trash2, Truck, UserPlus, Users, X } from "lucide-react";
+import { CalendarDays, ChevronDown, ChevronLeft, ChevronRight, Download, Edit3, LogOut, MapPin, Menu, Plus, Route, Search, Settings, Trash2, Truck, UserPlus, Users, X } from "lucide-react";
 
 const views = [
   { id: "agenda", label: "Agenda", subtitle: "Planificacion diaria", icon: CalendarDays, roles: ["admin", "usuario"] },
@@ -23,10 +23,9 @@ function addDays(days) {
   return localISO(date);
 }
 
-function minutesFromTime(value) {
-  if (!value) return 0;
-  const [hours, minutes] = String(value).split(":").map(Number);
-  return hours * 60 + minutes;
+function formatTime24(value) {
+  const [hours = "0", minutes = "0"] = String(value || "00:00").split(":");
+  return `${String(Number(hours)).padStart(2, "0")}:${String(Number(minutes)).padStart(2, "0")} HS`;
 }
 
 function daysUntil(iso) {
@@ -45,6 +44,18 @@ function roleLabel(role) {
 function canAccessView(role, view) {
   const normalized = normalizedRole(role);
   return !view.roles || view.roles.includes(normalized);
+}
+
+function taskOwnedBy(task, user) {
+  return Boolean(task?.assignedByUserId && user?.id && String(task.assignedByUserId) === String(user.id));
+}
+function isScheduleOnlyChange(previousTask, nextTask, user) {
+  const role = normalizedRole(user?.role);
+  if (!["admin", "chofer"].includes(role) || previousTask.start || !nextTask.start) return false;
+  if (role === "chofer" && Number(previousTask.driverId) !== Number(user.currentDriverId)) return false;
+  const { date: _previousDate, start: _previousStart, status: _previousStatus, updatedAt: _previousUpdatedAt, ...previousContent } = previousTask;
+  const { date: _nextDate, start: _nextStart, status: _nextStatus, updatedAt: _nextUpdatedAt, ...nextContent } = nextTask;
+  return JSON.stringify(previousContent) === JSON.stringify(nextContent);
 }
 
 function defaultVehicleDocs() {
@@ -134,6 +145,16 @@ const frequentAddresses = [
   "Av. San Martin 1470, Caseros",
 ];
 
+const addressAliases = {
+  "juncal 4431, caba": "Rural",
+  "av. cantilo 7350, caba": "Origami",
+  "av. rafael obligado 1229, caba": "Rut",
+};
+
+function addressLabel(address) {
+  return addressAliases[String(address || "").trim().toLowerCase()] || address;
+}
+
 function encodeMap(value) {
   return encodeURIComponent(value || "");
 }
@@ -152,14 +173,11 @@ function taskRouteURL(task) {
 function taskGoogleMapsURL(task) {
   const stops = (task.stops || []).map((stop) => (typeof stop === "string" ? stop : stop.address)).filter(Boolean);
   const origin = task.origin || "";
-  const destination = task.destination || stops.at(-1) || origin;
-  const waypoints = task.destination ? stops : stops.slice(0, -1);
-  const params = new URLSearchParams({
-    api: "1",
-    travelmode: "driving",
-    origin,
-    destination,
-  });
+  const destinations = [task.destination, ...stops].filter(Boolean);
+  const destination = origin ? (task.destination || stops.at(-1) || origin) : (destinations.at(-1) || "");
+  const waypoints = origin ? (task.destination ? stops : stops.slice(0, -1)) : destinations.slice(0, -1);
+  const params = new URLSearchParams({ api: "1", travelmode: "driving", destination });
+  if (origin) params.set("origin", origin);
   if (waypoints.length) params.set("waypoints", waypoints.join("|"));
   return `https://www.google.com/maps/dir/?${params.toString()}`;
 }
@@ -172,6 +190,113 @@ function apiHeaders(token, extra = {}) {
   return token ? { ...extra, authorization: `Bearer ${token}` } : extra;
 }
 
+const localUsers = [
+  { id: "local-admin", username: "admin", password: "admin123", name: "Administrador local", role: "admin", currentDriverId: null },
+  { id: "local-user", username: "usuario", password: "usuario123", name: "Usuario local", role: "usuario", currentDriverId: null },
+  { id: "local-driver", username: "chofer", password: "chofer123", name: "Juan Perez", role: "chofer", currentDriverId: 1 },
+];
+
+function isLocalPreview() {
+  return typeof window !== "undefined" && ["localhost", "127.0.0.1"].includes(window.location.hostname);
+}
+
+function localResponse(payload, status = 200) {
+  return new Response(JSON.stringify(payload), { status, headers: { "content-type": "application/json" } });
+}
+
+function publicLocalUsers(users = localUsers) {
+  return users.map(({ password: _password, ...user }) => user);
+}
+
+async function localApiFetch(path, options = {}) {
+  const method = options.method || "GET";
+  const savedUsers = JSON.parse(localStorage.getItem("tamiz_local_users") || "null") || localUsers;
+  const token = String(options.headers?.authorization || "").replace(/^Bearer\s+/i, "");
+  const current = savedUsers.find((item) => `local:${item.username}` === token);
+
+  if (path.startsWith("/api/geocode?")) {
+    const requestUrl = new URL(path, window.location.origin);
+    const upstream = new URL("https://nominatim.openstreetmap.org/search");
+    upstream.searchParams.set("format", "jsonv2");
+    upstream.searchParams.set("limit", requestUrl.searchParams.get("limit") || "1");
+    upstream.searchParams.set("countrycodes", "ar");
+    upstream.searchParams.set("accept-language", "es");
+    upstream.searchParams.set("q", requestUrl.searchParams.get("q") || "");
+    return fetch(upstream.toString(), { headers: { accept: "application/json" } });
+  }
+
+  if (path.startsWith("/api/route?")) {
+    const requestUrl = new URL(path, window.location.origin);
+    const coordinates = requestUrl.searchParams.get("coordinates") || "";
+    const upstream = new URL(`https://router.project-osrm.org/route/v1/driving/${coordinates}`);
+    upstream.searchParams.set("overview", "false");
+    upstream.searchParams.set("steps", "false");
+    return fetch(upstream.toString(), { headers: { accept: "application/json" } });
+  }
+  if (path === "/api/login" && method === "POST") {
+    const credentials = JSON.parse(options.body || "{}");
+    const found = savedUsers.find((item) => item.username === String(credentials.username || "").toLowerCase() && item.password === credentials.password);
+    if (!found) return localResponse({ error: "Usuario o contrasena incorrectos" }, 401);
+    return localResponse({ token: `local:${found.username}`, user: publicLocalUsers([found])[0], users: publicLocalUsers(savedUsers) });
+  }
+  if (path === "/api/logout") return localResponse({ ok: true });
+  if (!current) return localResponse({ error: "Sesion vencida" }, 401);
+  if (path === "/api/session") return localResponse({ user: publicLocalUsers([current])[0], users: publicLocalUsers(savedUsers) });
+  if (path === "/api/state" && method === "GET") {
+    const storedData = JSON.parse(localStorage.getItem("tamiz_local_state") || "null") || seed;
+    const data = {
+      ...storedData,
+      tasks: storedData.tasks.map((task) => task.assignedByUserId ? task : {
+        ...task,
+        assignedByUserId: "local-admin",
+        assignedByUserName: "Administrador local",
+      }),
+    };
+    localStorage.setItem("tamiz_local_state", JSON.stringify(data));
+    const revision = Number(localStorage.getItem("tamiz_local_revision") || 1);
+    return localResponse({ user: publicLocalUsers([current])[0], users: publicLocalUsers(savedUsers), data, revision });
+  }
+  if (path === "/api/state" && method === "PUT") {
+    const payload = JSON.parse(options.body || "{}");
+    const previousData = JSON.parse(localStorage.getItem("tamiz_local_state") || "null") || seed;
+    const nextData = structuredClone(payload.data);
+    const previousTasks = new Map(previousData.tasks.map((task) => [String(task.id), task]));
+    for (const nextTask of nextData.tasks) {
+      const previousTask = previousTasks.get(String(nextTask.id));
+      if (!previousTask) {
+        nextTask.assignedByUserId = current.id;
+        nextTask.assignedByUserName = current.name || current.username;
+        continue;
+      }
+      const { status: _previousStatus, ...previousContent } = previousTask;
+      const { status: _nextStatus, ...nextContent } = nextTask;
+      if (JSON.stringify(previousContent) !== JSON.stringify(nextContent)) {
+        if (!isScheduleOnlyChange(previousTask, nextTask, current) && !taskOwnedBy(previousTask, current)) return localResponse({ error: "Solo puede editar la tarea el usuario que la asigno." }, 403);
+        nextTask.assignedByUserId = previousTask.assignedByUserId;
+        nextTask.assignedByUserName = previousTask.assignedByUserName;
+      }
+    }
+    const nextRevision = Number(localStorage.getItem("tamiz_local_revision") || 1) + 1;
+    localStorage.setItem("tamiz_local_state", JSON.stringify(nextData));
+    localStorage.setItem("tamiz_local_revision", String(nextRevision));
+    return localResponse({ data: nextData, revision: nextRevision });
+  }
+  if (path === "/api/users" && ["POST", "PUT"].includes(method)) {
+    const payload = JSON.parse(options.body || "{}");
+    const existing = savedUsers.find((item) => item.id === payload.id);
+    const nextUser = existing ? { ...existing, ...payload, password: payload.password || existing.password } : { ...payload, id: `local-${Date.now()}` };
+    const nextUsers = existing ? savedUsers.map((item) => item.id === existing.id ? nextUser : item) : [...savedUsers, nextUser];
+    localStorage.setItem("tamiz_local_users", JSON.stringify(nextUsers));
+    const nextCurrent = nextUser.id === current.id ? publicLocalUsers([nextUser])[0] : publicLocalUsers([current])[0];
+    return localResponse({ user: nextCurrent, users: publicLocalUsers(nextUsers) });
+  }
+  return localResponse({ error: "Endpoint local no disponible" }, 404);
+}
+
+function appFetch(path, options) {
+  return isLocalPreview() && path.startsWith("/api/") ? localApiFetch(path, options) : fetch(path, options);
+}
+
 export default function Home() {
   const menuTouch = useRef({ x: 0, y: 0, tracking: false });
   const installPrompt = useRef(null);
@@ -182,6 +307,7 @@ export default function Home() {
   const [revision, setRevision] = useState(0);
   const [view, setView] = useState("agenda");
   const [selectedDate, setSelectedDate] = useState(localISO());
+  const [routeDate, setRouteDate] = useState(localISO());
   const [loading, setLoading] = useState(true);
   const [loginError, setLoginError] = useState("");
   const [busy, setBusy] = useState(false);
@@ -204,15 +330,37 @@ export default function Home() {
   );
 
   const routeTasks = useMemo(
-    () => db.tasks.filter((task) => task.date === localISO() && Number(task.driverId || driverId) === Number(driverId)),
-    [db.tasks, driverId],
+    () => db.tasks.filter((task) => task.date === routeDate && Number(task.driverId || driverId) === Number(driverId)),
+    [db.tasks, driverId, routeDate],
   );
 
+  const nextRouteDate = useMemo(() => {
+    const dates = db.tasks
+      .filter((task) => Number(task.driverId || driverId) === Number(driverId) && task.date > routeDate)
+      .map((task) => task.date)
+      .filter(Boolean)
+      .sort();
+    return dates[0] || null;
+  }, [db.tasks, driverId, routeDate]);
+
+  const previousRouteDate = useMemo(() => {
+    const dates = db.tasks
+      .filter((task) => Number(task.driverId || driverId) === Number(driverId) && task.date < routeDate)
+      .map((task) => task.date)
+      .filter(Boolean)
+      .sort()
+      .reverse();
+    return dates[0] || null;
+  }, [db.tasks, driverId, routeDate]);
+  const routeDateTitle = routeDate === localISO()
+    ? "Trabajo de hoy"
+    : new Date(`${routeDate}T12:00:00`).toLocaleDateString("es-AR", { weekday: "long", day: "numeric", month: "long" });
+
   const week = useMemo(() => {
-    const selected = new Date(`${selectedDate}T12:00:00`);
-    const monday = new Date(selected);
-    monday.setDate(selected.getDate() - ((selected.getDay() + 6) % 7));
-    return Array.from({ length: 7 }, (_, index) => {
+    const today = new Date(`${localISO()}T12:00:00`);
+    const monday = new Date(today);
+    monday.setDate(today.getDate() - ((today.getDay() + 6) % 7));
+    return Array.from({ length: 35 }, (_, index) => {
       const date = new Date(monday);
       date.setDate(monday.getDate() + index);
       const iso = localISO(date);
@@ -223,7 +371,7 @@ export default function Home() {
         count: db.tasks.filter((task) => task.date === iso).length,
       };
     });
-  }, [db.tasks, selectedDate]);
+  }, [db.tasks]);
 
   function notify(message, type = "ok") {
     setToast({ message, type });
@@ -231,7 +379,7 @@ export default function Home() {
   }
 
   async function loadState(nextToken, silent = false) {
-    const response = await fetch("/api/state", { headers: apiHeaders(nextToken, { accept: "application/json" }) });
+    const response = await appFetch("/api/state", { headers: apiHeaders(nextToken, { accept: "application/json" }) });
     if (response.status === 401) throw new Error("Sesion vencida");
     if (!response.ok) throw new Error("No se pudo abrir la base compartida");
     const payload = await response.json();
@@ -249,7 +397,7 @@ export default function Home() {
   }
 
   async function saveState(nextToken, nextDb, currentRevision = revision, message = "Guardado") {
-    const response = await fetch("/api/state", {
+    const response = await appFetch("/api/state", {
       method: "PUT",
       headers: apiHeaders(nextToken || token, { "content-type": "application/json" }),
       body: JSON.stringify({ data: nextDb, revision: currentRevision, action: "save-state" }),
@@ -273,7 +421,7 @@ export default function Home() {
       return;
     }
     setToken(saved);
-    fetch("/api/session", { headers: apiHeaders(saved, { accept: "application/json" }) })
+    appFetch("/api/session", { headers: apiHeaders(saved, { accept: "application/json" }) })
       .then(async (response) => {
         if (!response.ok) throw new Error("Sesion vencida");
         const payload = await response.json();
@@ -393,7 +541,7 @@ export default function Home() {
     setLoginError("");
     const form = new FormData(event.currentTarget);
     try {
-      const response = await fetch("/api/login", {
+      const response = await appFetch("/api/login", {
         method: "POST",
         headers: { "content-type": "application/json" },
         body: JSON.stringify({
@@ -417,7 +565,7 @@ export default function Home() {
   }
 
   async function logout() {
-    await fetch("/api/logout", { method: "POST", headers: apiHeaders(token) }).catch(() => null);
+    await appFetch("/api/logout", { method: "POST", headers: apiHeaders(token) }).catch(() => null);
     localStorage.removeItem("tamiz_session");
     setToken("");
     setUser(null);
@@ -425,20 +573,6 @@ export default function Home() {
   }
 
   async function persistTask(nextTask, mode = "create") {
-    const assigned = Number(nextTask.assigned || nextTask.duration || 0);
-    const start = minutesFromTime(nextTask.start);
-    const end = start + assigned;
-    const conflict = db.tasks.some((task) => {
-      if (mode === "edit" && Number(task.id) === Number(nextTask.id)) return false;
-      if (task.date !== nextTask.date || Number(task.driverId) !== Number(nextTask.driverId)) return false;
-      const taskStart = minutesFromTime(task.start);
-      const taskEnd = taskStart + Number(task.assigned || task.duration || 0);
-      return start < taskEnd && end > taskStart;
-    });
-    if (conflict) {
-      notify("El chofer ya tiene una tarea en ese intervalo.", "error");
-      return;
-    }
     const driver = db.drivers.find((item) => Number(item.id) === Number(nextTask.driverId));
     const vehicle = db.vehicles.find((item) => Number(item.id) === Number(nextTask.vehicleId));
     if (driver && daysUntil(driver.licenseExpiry) < 0) {
@@ -465,16 +599,45 @@ export default function Home() {
   }
 
   async function addTask(nextTask) {
-    await persistTask(nextTask, "create");
+    await persistTask({
+      ...nextTask,
+      assignedByUserId: user.id,
+      assignedByUserName: user.name || user.username || user.email || "Usuario",
+    }, "create");
   }
 
   async function editTask(nextTask) {
-    await persistTask(nextTask, "edit");
+    const existing = db.tasks.find((task) => Number(task.id) === Number(nextTask.id));
+    if (!taskOwnedBy(existing, user)) {
+      notify("Solo puede editar la tarea el usuario que la asigno.", "error");
+      throw new Error("No tiene permiso para editar esta tarea");
+    }
+    await persistTask({
+      ...nextTask,
+      assignedByUserId: existing.assignedByUserId,
+      assignedByUserName: existing.assignedByUserName,
+    }, "edit");
   }
 
   async function updateTask(task, status) {
     const nextDb = { ...db, tasks: db.tasks.map((item) => (item.id === task.id ? { ...item, status } : item)) };
     await saveState(token, nextDb, revision, "Estado actualizado");
+  }
+  async function scheduleTask(task, date, start) {
+    if (task.start) throw new Error("Esta tarea ya tiene un horario asignado.");
+    if (!["admin", "chofer"].includes(currentRole)) throw new Error("Solo el chofer o supervisor puede asignar horario.");
+    if (currentRole === "chofer" && Number(task.driverId) !== Number(user.currentDriverId)) throw new Error("Esta tarea no esta asignada a este chofer.");
+    const scheduledTask = { ...task, date: date || task.date || localISO(), start, updatedAt: new Date().toISOString() };
+    const nextDb = { ...db, tasks: db.tasks.map((item) => Number(item.id) === Number(task.id) ? scheduledTask : item) };
+    await saveState(token, nextDb, revision, "Horario asignado");
+    setRouteDate(scheduledTask.date);
+  }
+
+  async function deleteTask(task) {
+    const label = task.title || task.description || "esta tarea";
+    if (!window.confirm(`¿Eliminar ${label}? Esta accion no se puede deshacer.`)) return;
+    const nextDb = { ...db, tasks: db.tasks.filter((item) => Number(item.id) !== Number(task.id)) };
+    await saveState(token, nextDb, revision, "Tarea eliminada");
   }
 
   async function saveDriver(nextDriver, account = null) {
@@ -485,7 +648,7 @@ export default function Home() {
     };
     await saveState(token, nextDb, revision, exists ? "Chofer actualizado" : "Chofer creado");
     if (account?.username) {
-      const response = await fetch("/api/users", {
+      const response = await appFetch("/api/users", {
         method: account.userId ? "PUT" : "POST",
         headers: apiHeaders(token, { "content-type": "application/json" }),
         body: JSON.stringify({
@@ -600,6 +763,7 @@ export default function Home() {
               <div className="week">
                 {week.map((day) => (
                   <button key={day.iso} className={`dayChip ${selectedDate === day.iso ? "active" : ""}`} onClick={() => setSelectedDate(day.iso)}>
+                    {day.count > 0 ? <span className="taskDot" aria-label={`${day.count} tareas asignadas`} title={`${day.count} tareas asignadas`} /> : null}
                     <span>{day.label}</span>
                     <b>{day.day}</b>
                     <small>{day.count} tareas</small>
@@ -611,12 +775,15 @@ export default function Home() {
                 tasks={dayTasks}
                 db={db}
                 canCreate={canManageTasks}
+                currentUser={user}
                 onFreeSlot={(time) => {
                   setEditingTask(null);
                   setTaskPrefill({ date: selectedDate, time });
                   setView("nueva");
                 }}
                 onStatus={updateTask}
+                onDelete={deleteTask}
+                onSave={editTask}
                 onEdit={(task) => {
                   setEditingTask(task);
                   setTaskPrefill({ date: task.date, time: task.start });
@@ -628,13 +795,34 @@ export default function Home() {
 
           {view === "ruta" && (
             <>
-              <div className="toolbar">
+              <div className="toolbar routeToolbar">
                 <div>
                   <span className="eyebrow">MI RUTA</span>
-                  <h2>Trabajo de hoy</h2>
+                  <h2>{routeDateTitle}</h2>
+                </div>
+                <div className="routeDateNav">
+                  <button className="btn" type="button" onClick={() => previousRouteDate && setRouteDate(previousRouteDate)} disabled={!previousRouteDate}>
+                    <ChevronLeft size={17} /> {previousRouteDate ? "Anterior" : "No hay anteriores"}
+                  </button>
+                  <button className="btn" type="button" onClick={() => nextRouteDate && setRouteDate(nextRouteDate)} disabled={!nextRouteDate}>
+                    <CalendarDays size={17} /> {nextRouteDate ? "Siguiente" : "No hay mas tareas"} {nextRouteDate ? <ChevronRight size={17} /> : null}
+                  </button>
                 </div>
               </div>
-              <TaskList tasks={routeTasks} db={db} onStatus={updateTask} canOperate />
+              <RouteTaskGroup title="Tareas del dia" count={routeTasks.filter((task) => task.start).length} defaultOpen>
+                <TaskList tasks={routeTasks.filter((task) => task.start)} db={db} currentUser={user} onStatus={updateTask} onSchedule={scheduleTask} canSchedule={false} canOperate onEdit={(task) => {
+                  setEditingTask(task);
+                  setTaskPrefill({ date: task.date, time: task.start });
+                  setView("nueva");
+                }} />
+              </RouteTaskGroup>
+              <RouteTaskGroup title="Tareas sin horario" count={routeTasks.filter((task) => !task.start).length} defaultOpen>
+                <TaskList tasks={routeTasks.filter((task) => !task.start)} db={db} currentUser={user} onStatus={updateTask} onSchedule={scheduleTask} canSchedule={["admin", "chofer"].includes(currentRole)} canOperate onEdit={(task) => {
+                  setEditingTask(task);
+                  setTaskPrefill({ date: task.date, time: task.start });
+                  setView("nueva");
+                }} />
+              </RouteTaskGroup>
             </>
           )}
 
@@ -644,6 +832,7 @@ export default function Home() {
               prefill={taskPrefill}
               initialTask={editingTask}
               currentDriverId={driverId}
+              canAssignSchedule={["admin", "chofer"].includes(currentRole)}
               onCancel={() => { setEditingTask(null); setView("agenda"); }}
               onCreate={editingTask ? editTask : addTask}
               onError={(message) => notify(message, "error")}
@@ -688,56 +877,99 @@ function Kpis({ tasks, vehicles, drivers }) {
   );
 }
 
-function TaskList({ tasks, db, onStatus, canOperate }) {
+function RouteTaskGroup({ title, count, defaultOpen = false, children }) {
+  return (
+    <details className="routeTaskGroup" open={defaultOpen}>
+      <summary>
+        <span>{title}</span>
+        <span className="routeTaskGroupMeta"><small>{count} {count === 1 ? "tarea" : "tareas"}</small><ChevronDown size={18} /></span>
+      </summary>
+      <div className="routeTaskGroupBody">{children}</div>
+    </details>
+  );
+}
+function TaskList({ tasks, db, currentUser, onStatus, onEdit, onSchedule, canSchedule, canOperate }) {
   if (!tasks.length) return <div className="empty">No hay tareas para este dia.</div>;
   return (
     <section className="routeTasks">
-      {tasks.map((task) => {
-        const driver = db.drivers.find((item) => Number(item.id) === Number(task.driverId));
-        const vehicle = db.vehicles.find((item) => Number(item.id) === Number(task.vehicleId));
+      {[...tasks].sort((a, b) => String(a.start || "").localeCompare(String(b.start || ""))).map((task) => {
+
+
         const stops = (task.stops || []).map((stop) => (typeof stop === "string" ? stop : stop.address)).filter(Boolean);
-        const destination = task.destination || stops.at(-1) || "Sin destino final";
+        const destinations = [task.destination, ...stops].filter(Boolean);
         return (
-          <article className="driverTaskCard" key={task.id}>
-            <header className="driverTaskHeader">
-              <span className="driverTaskTime">{task.start || "--:--"}</span>
-              <span className={`status ${task.status}`}>{statusText[task.status] || task.status}</span>
-            </header>
-            <section className="driverTaskBlock highlight">
-              <span className="eyebrow">ARRANCA</span>
-              <h3>{task.origin || "Sin origen cargado"}</h3>
-              <p>{vehicle ? `${vehicle.name} - ${vehicle.plate}` : "Sin vehiculo asignado"}</p>
-            </section>
-            <section className="driverTaskBlock">
-              <span className="eyebrow">TAREA</span>
-              <h4>{task.title || task.description || "Tarea sin titulo"}</h4>
-              <p>{task.description || task.observations || "Sin descripcion cargada."}</p>
-              <p>{task.merchandise || "Mercaderia sin especificar"}{task.quantities ? ` - ${task.quantities}` : ""}</p>
-              <p>{driver?.name || "Sin chofer asignado"}</p>
-            </section>
-            <section className="driverTaskBlock">
-              <span className="eyebrow">TERMINA</span>
-              <h4>{destination}</h4>
-              {stops.length ? <p>Paradas: {stops.join(" / ")}</p> : null}
-              <p>{task.assigned || task.duration || "Sin calcular"} min{task.distance ? ` - ${task.distance} km` : ""}</p>
-            </section>
-            <div className="driverTaskActions">
-              <a className="btn primary" href={taskGoogleMapsURL(task)} target="_blank" rel="noreferrer">Abrir Maps</a>
-              {canOperate ? (
-                <>
-                  {task.status !== "en-trabajo" ? <button className="btn" onClick={() => onStatus(task, "en-trabajo")}>Iniciar</button> : null}
-                  {task.status !== "realizada" ? <button className="btn primary" onClick={() => onStatus(task, "realizada")}>Finalizar</button> : null}
-                </>
-              ) : null}
+          <details className="driverTaskCard" key={task.id}>
+            <summary className="driverTaskHeader">
+              <span className="driverTaskHeading">
+                <span className="driverTaskTime">{task.start ? formatTime24(task.start) : "Sin horario"}</span>
+                <strong className="driverTaskTitle">{task.title || task.description || "Tarea sin titulo"}</strong>
+              </span>
+              <span className="driverTaskHeaderMeta">
+                <span className={`status ${task.status}`}>{statusText[task.status] || task.status}</span>
+                <ChevronDown className="driverTaskChevron" size={19} aria-hidden="true" />
+              </span>
+            </summary>
+            <div className="driverTaskBody">
+
+              <section className="driverTaskBlock">
+                <span className="eyebrow">TAREA</span>
+                <h4>{task.title || task.description || "Tarea sin titulo"}</h4>
+                <p>{task.description || task.observations || "Sin descripcion cargada."}</p>
+                <p><b>Observaciones:</b> {task.observations || "Sin observaciones"}</p>
+              </section>
+              <section className="driverTaskBlock highlight">
+                <span className="eyebrow">DESTINOS</span>
+                <h3>{destinations[0] || "Sin destino cargado"}</h3>
+                {destinations.length > 1 ? <p>Luego: {destinations.slice(1).join(" / ")}</p> : null}
+                <p>{task.distance ? `${task.distance} km entre destinos` : "Google Maps calculara el recorrido"}</p>
+              </section>
+              <div className="driverTaskActions">
+                <a className="iconBtn navigationBtn" href={taskGoogleMapsURL(task)} target="_blank" rel="noreferrer" aria-label="Abrir navegacion en Google Maps" title="Abrir navegacion en Google Maps"><MapPin size={19} /></a>
+                {!task.start && canSchedule ? <TaskSchedule task={task} onSchedule={onSchedule} /> : null}
+                {taskOwnedBy(task, currentUser) ? <button className="btn" type="button" onClick={() => onEdit(task)}><Edit3 size={15} /> Editar</button> : null}
+                {canOperate ? (
+                  <>
+                    {task.status !== "en-trabajo" ? <button className="btn" onClick={() => onStatus(task, "en-trabajo")}>Iniciar</button> : null}
+                    {task.status !== "realizada" ? <button className="btn primary" onClick={() => onStatus(task, "realizada")}>Finalizar</button> : null}
+                  </>
+                ) : null}
+              </div>
             </div>
-          </article>
+          </details>
         );
       })}
     </section>
   );
 }
+function TaskSchedule({ task, onSchedule }) {
+  const [editing, setEditing] = useState(false);
+  const [date, setDate] = useState(task.date || localISO());
+  const [start, setStart] = useState("");
+  const [saving, setSaving] = useState(false);
 
-function DailySchedule({ date, tasks, db, canCreate, onFreeSlot, onStatus, onEdit }) {
+  async function submit(event) {
+    event.preventDefault();
+    setSaving(true);
+    try {
+      await onSchedule(task, date, start);
+      setEditing(false);
+    } finally {
+      setSaving(false);
+    }
+  }
+
+  if (!editing) return <button className="btn" type="button" onClick={() => setEditing(true)}><CalendarDays size={16} /> Asignar horario</button>;
+
+  return (
+    <form className="taskScheduleForm" onSubmit={submit}>
+      <input type="date" value={date} onChange={(event) => setDate(event.target.value)} required aria-label="Fecha de la tarea" />
+      <input type="time" value={start} onChange={(event) => setStart(event.target.value)} required aria-label="Hora de la tarea" />
+      <button className="btn primary compact" disabled={saving}>{saving ? "Guardando..." : "Confirmar"}</button>
+      <button className="btn compact" type="button" onClick={() => setEditing(false)} disabled={saving}>Cancelar</button>
+    </form>
+  );
+}
+function DailySchedule({ date, tasks, db, canCreate, currentUser, onFreeSlot, onStatus, onEdit, onDelete, onSave }) {
   const hours = Array.from({ length: 13 }, (_, index) => index + 7);
   const outside = tasks.filter((task) => {
     const hour = Number(String(task.start || "00:00").split(":")[0]);
@@ -759,7 +991,7 @@ function DailySchedule({ date, tasks, db, canCreate, onFreeSlot, onStatus, onEdi
                 {hourValue}
               </button>
               <div className="scheduleContent">
-                {hourTasks.length ? hourTasks.map((task) => <DailyTask key={task.id} task={task} db={db} canOperate={canCreate} onStatus={onStatus} onEdit={onEdit} />) : (
+                {hourTasks.length ? hourTasks.map((task) => <DailyTask key={task.id} task={task} db={db} canOperate={canCreate} currentUser={currentUser} onStatus={onStatus} onEdit={onEdit} onDelete={onDelete} onSave={onSave} />) : (
                   <button className="freeSlot" disabled={!canCreate} onClick={() => onFreeSlot(hourValue)}>
                     <span>Horario libre</span>
                     <small>Agregar tarea</small>
@@ -773,7 +1005,7 @@ function DailySchedule({ date, tasks, db, canCreate, onFreeSlot, onStatus, onEdi
           <div className="scheduleRow occupied" key={`outside-${task.id}`}>
             <span className="scheduleTime">{task.start}</span>
             <div className="scheduleContent">
-              <DailyTask task={task} db={db} canOperate={canCreate} onStatus={onStatus} onEdit={onEdit} outside />
+              <DailyTask task={task} db={db} canOperate={canCreate} currentUser={currentUser} onStatus={onStatus} onEdit={onEdit} onDelete={onDelete} onSave={onSave} outside />
             </div>
           </div>
         ))}
@@ -782,10 +1014,53 @@ function DailySchedule({ date, tasks, db, canCreate, onFreeSlot, onStatus, onEdi
   );
 }
 
-function DailyTask({ task, db, canOperate, onStatus, onEdit, outside = false }) {
-  const driver = db.drivers.find((item) => Number(item.id) === Number(task.driverId));
-  const vehicle = db.vehicles.find((item) => Number(item.id) === Number(task.vehicleId));
+function DailyTask({ task, canOperate, currentUser, onStatus, onDelete, onSave, outside = false }) {
+  const [editing, setEditing] = useState(false);
+  const [saving, setSaving] = useState(false);
+  const [draft, setDraft] = useState(null);
   const stops = (task.stops || []).map((stop) => (typeof stop === "string" ? stop : stop.address)).filter(Boolean);
+  const canEdit = canOperate && taskOwnedBy(task, currentUser);
+
+  function beginEditing() {
+    setDraft({
+      description: task.description || "",
+      distance: String(task.distance || 0),
+      merchandise: task.merchandise || "",
+      quantities: task.quantities || "",
+      contact: task.contact || "",
+      phone: task.phone || "",
+      assignedBy: task.assignedBy || "",
+      stops: stops.join("\n"),
+    });
+    setEditing(true);
+  }
+
+  function updateDraft(name, value) {
+    setDraft((current) => ({ ...current, [name]: value }));
+  }
+
+  async function saveInlineEdit() {
+    setSaving(true);
+    try {
+      await onSave({
+        ...task,
+        description: draft.description.trim(),
+        assigned: 0,
+        duration: 0,
+        distance: Math.max(0, Number(draft.distance) || 0),
+        merchandise: draft.merchandise.trim(),
+        quantities: draft.quantities.trim(),
+        contact: draft.contact.trim(),
+        phone: draft.phone.trim(),
+        assignedBy: draft.assignedBy.trim(),
+        stops: draft.stops.split("\n").map((stop) => stop.trim()).filter(Boolean),
+      });
+      setEditing(false);
+      setDraft(null);
+    } finally {
+      setSaving(false);
+    }
+  }
 
   return (
     <details className={`dailyTask ${outside ? "outside" : ""}`}>
@@ -793,36 +1068,61 @@ function DailyTask({ task, db, canOperate, onStatus, onEdit, outside = false }) 
         <span className="dailyTaskTime">{task.start}</span>
         <span className="dailyTaskMain">
           <b>{task.title || task.description || "Tarea sin titulo"}</b>
-          <small>{task.origin || "Sin origen"} -> {task.destination || "Sin destino final"}</small>
+          <small>{task.origin || "Sin origen"} -&gt; {task.destination || "Sin destino final"}</small>
         </span>
         <span className={`status ${task.status}`}>{statusText[task.status] || task.status}</span>
       </summary>
-      <div className="dailyTaskDetail">
-        <p>{task.description || "Sin descripcion"}</p>
+      <div className={`dailyTaskDetail ${editing ? "editing" : ""}`}>
+        {editing ? (
+          <label className="inlineDescription">
+            <b>Descripcion</b>
+            <textarea value={draft.description} onChange={(event) => updateDraft("description", event.target.value)} />
+          </label>
+        ) : <p>{task.description || "Sin descripcion"}</p>}
         <div className="dailyMeta">
-          <span><b>Chofer</b>{driver?.name || "Sin asignar"}</span>
-          <span><b>Vehiculo</b>{vehicle ? `${vehicle.name} - ${vehicle.plate}` : "Sin asignar"}</span>
-          <span><b>Duracion</b>{task.assigned || task.duration || 0} min</span>
-          <span><b>Distancia</b>{task.distance || 0} km</span>
-          <span><b>Mercaderia</b>{task.merchandise || "-"}</span>
-          <span><b>Cantidades</b>{task.quantities || "-"}</span>
-          <span><b>Contacto</b>{task.contact || "-"} {task.phone ? `- ${task.phone}` : ""}</span>
-          <span><b>Asignada por</b>{task.assignedBy || "-"}</span>
-          <span><b>Paradas</b>{stops.length ? stops.join(" / ") : "Sin paradas"}</span>
+          {editing ? (
+            <>
+              <label><b>Distancia</b><input type="number" min="0" step="0.1" value={draft.distance} onChange={(event) => updateDraft("distance", event.target.value)} /></label>
+              <label><b>Mercaderia</b><input value={draft.merchandise} onChange={(event) => updateDraft("merchandise", event.target.value)} /></label>
+              <label><b>Cantidades</b><input value={draft.quantities} onChange={(event) => updateDraft("quantities", event.target.value)} /></label>
+              <label><b>Contacto</b><input value={draft.contact} onChange={(event) => updateDraft("contact", event.target.value)} /></label>
+              <label><b>Telefono</b><input value={draft.phone} onChange={(event) => updateDraft("phone", event.target.value)} /></label>
+              <label><b>Asignada por</b><input value={draft.assignedBy} onChange={(event) => updateDraft("assignedBy", event.target.value)} /></label>
+              <label><b>Paradas</b><textarea value={draft.stops} onChange={(event) => updateDraft("stops", event.target.value)} placeholder="Una parada por linea" /></label>
+            </>
+          ) : (
+            <>
+              <span><b>Distancia</b>{task.distance || 0} km</span>
+              <span><b>Mercaderia</b>{task.merchandise || "-"}</span>
+              <span><b>Cantidades</b>{task.quantities || "-"}</span>
+              <span><b>Contacto</b>{task.contact || "-"} {task.phone ? `- ${task.phone}` : ""}</span>
+              <span><b>Asignada por</b>{task.assignedBy || "-"}</span>
+              <span><b>Paradas</b>{stops.length ? stops.join(" / ") : "Sin paradas"}</span>
+            </>
+          )}
         </div>
         <div className="inlineActions">
-          <a className="btn primary" href={taskGoogleMapsURL(task)} target="_blank" rel="noreferrer">Abrir en Google Maps</a>
-          <a className="btn" href={taskRouteURL(task)} target="_blank" rel="noreferrer">Abrir en OSM</a>
-          {task.merchandisePdf?.data ? <a className="btn" href={task.merchandisePdf.data} download={task.merchandisePdf.name}>Abrir PDF</a> : null}
-          {canOperate ? <button className="btn" onClick={() => onEdit(task)}><Edit3 size={15} /> Editar</button> : null}
-          {canOperate && task.status !== "en-trabajo" ? <button className="btn" onClick={() => onStatus(task, "en-trabajo")}>Iniciar</button> : null}
-          {canOperate && task.status !== "realizada" ? <button className="btn primary" onClick={() => onStatus(task, "realizada")}>Finalizar</button> : null}
+          {editing ? (
+            <>
+              <button className="btn primary" type="button" onClick={saveInlineEdit} disabled={saving}>{saving ? "Guardando..." : "Guardar"}</button>
+              <button className="btn" type="button" onClick={() => { setEditing(false); setDraft(null); }} disabled={saving}>Cancelar</button>
+            </>
+          ) : (
+            <>
+              <a className="btn primary" href={taskGoogleMapsURL(task)} target="_blank" rel="noreferrer">Abrir en Google Maps</a>
+              <a className="btn" href={taskRouteURL(task)} target="_blank" rel="noreferrer">Abrir en OSM</a>
+              {task.merchandisePdf?.data ? <a className="btn" href={task.merchandisePdf.data} download={task.merchandisePdf.name}>Abrir PDF</a> : null}
+              {canEdit ? <button className="btn" type="button" onClick={beginEditing}><Edit3 size={15} /> Editar</button> : null}
+              {canOperate ? <button className="iconBtn danger" type="button" onClick={() => onDelete(task)} aria-label="Eliminar tarea" title="Eliminar tarea"><Trash2 size={16} /></button> : null}
+              {canOperate && task.status !== "en-trabajo" ? <button className="btn" onClick={() => onStatus(task, "en-trabajo")}>Iniciar</button> : null}
+              {canOperate && task.status !== "realizada" ? <button className="btn primary" onClick={() => onStatus(task, "realizada")}>Finalizar</button> : null}
+            </>
+          )}
         </div>
       </div>
     </details>
   );
 }
-
 function Accordion({ title, children, defaultOpen = false }) {
   return (
     <details className="accordion" open={defaultOpen}>
@@ -853,12 +1153,13 @@ function taskToForm(task, prefill, currentDriverId, db) {
   };
 }
 
-function NewTaskForm({ db, prefill, initialTask = null, currentDriverId, onCancel, onCreate, onError }) {
+function NewTaskForm({ db, prefill, initialTask = null, currentDriverId, canAssignSchedule, onCancel, onCreate, onError }) {
   const [form, setForm] = useState(() => taskToForm(initialTask, prefill, currentDriverId, db));
-  const [routeInfo, setRouteInfo] = useState({ status: "El destino final es opcional. Podes cargar varias direcciones en Paradas.", distance: "", coordinates: [] });
+  const [routeInfo, setRouteInfo] = useState({ status: "Google Maps usara tu ubicacion actual para iniciar el recorrido.", distance: "", coordinates: [] });
   const [calculating, setCalculating] = useState(false);
   const [pdf, setPdf] = useState(null);
   const isEditing = Boolean(initialTask);
+  const canSetSchedule = canAssignSchedule && !initialTask?.start;
   const formResetKey = [
     initialTask?.id || "new",
     prefill.date || "",
@@ -870,22 +1171,21 @@ function NewTaskForm({ db, prefill, initialTask = null, currentDriverId, onCance
     setForm(taskToForm(initialTask, prefill, currentDriverId, db));
     setPdf(null);
     setRouteInfo({
-      status: initialTask?.distance ? `${initialTask.duration || initialTask.assigned || 0} min - ${initialTask.distance} km, estimado guardado.` : "El destino final es opcional. Podes cargar varias direcciones en Paradas.",
+      status: initialTask?.distance ? `${initialTask.distance} km entre destinos, estimado guardado.` : "Google Maps usara tu ubicacion actual para iniciar el recorrido.",
       distance: initialTask?.distance || "",
       coordinates: initialTask?.routeCoordinates || [],
     });
   }, [formResetKey]);
 
   useEffect(() => {
-    const addresses = [form.origin, ...form.stops.map((value) => value.trim()).filter(Boolean), form.destination].filter(Boolean);
+    const addresses = [form.destination, ...form.stops.map((value) => value.trim()).filter(Boolean)].filter(Boolean);
     if (addresses.length < 2) {
-      setRouteInfo({ status: "Cargá origen y al menos un destino/parada para calcular OSRM.", distance: "", coordinates: [] });
-      setForm((current) => ({ ...current, assigned: "", duration: "" }));
+      setRouteInfo({ status: addresses.length ? "Google Maps calculara el recorrido desde tu ubicacion actual." : "Agrega un destino para abrir la navegacion.", distance: "", coordinates: [] });
       return undefined;
     }
     const timer = window.setTimeout(() => calculateRoute(addresses), 900);
     return () => window.clearTimeout(timer);
-  }, [form.origin, form.stops, form.destination]);
+  }, [form.destination, form.stops]);
 
   function update(name, value) {
     setForm((current) => ({ ...current, [name]: value }));
@@ -904,7 +1204,7 @@ function NewTaskForm({ db, prefill, initialTask = null, currentDriverId, onCance
   }
 
   async function geocodeAddress(address) {
-    const response = await fetch(`/api/geocode?q=${encodeURIComponent(address)}`);
+    const response = await appFetch(`/api/geocode?q=${encodeURIComponent(address)}`);
     if (!response.ok) throw new Error(`El geocodificador respondio ${response.status}`);
     const results = await response.json();
     const result = results[0];
@@ -914,21 +1214,18 @@ function NewTaskForm({ db, prefill, initialTask = null, currentDriverId, onCance
 
   async function calculateRoute(addresses) {
     setCalculating(true);
-    setRouteInfo((current) => ({ ...current, status: "Buscando direcciones y calculando la ruta con OSRM..." }));
+    setRouteInfo((current) => ({ ...current, status: "Buscando direcciones y calculando la distancia..." }));
     try {
       const coordinates = [];
       for (const address of addresses) coordinates.push(await geocodeAddress(address));
-      const routeResponse = await fetch(`/api/route?coordinates=${coordinates.map((point) => point.join(",")).join(";")}`);
+      const routeResponse = await appFetch(`/api/route?coordinates=${coordinates.map((point) => point.join(",")).join(";")}`);
       if (!routeResponse.ok) throw new Error(`OSRM respondio ${routeResponse.status}`);
       const payload = await routeResponse.json();
       const route = payload.routes?.[0];
       if (payload.code !== "Ok" || !route) throw new Error(payload.message || "OSRM no encontro una ruta");
-      const minutes = Math.max(1, Math.ceil(route.duration / 60));
       const distance = (route.distance / 1000).toFixed(1);
-      setForm((current) => ({ ...current, assigned: String(minutes), duration: String(minutes) }));
-      setRouteInfo({ status: `${minutes} min - ${distance} km, estimado por OSRM. Sin trafico en vivo.`, distance, coordinates });
+      setRouteInfo({ status: `${distance} km de recorrido estimado. El mapa calculara el tiempo al navegar.`, distance, coordinates });
     } catch (error) {
-      setForm((current) => ({ ...current, assigned: "", duration: "" }));
       setRouteInfo({ status: error.message || "No se pudo calcular la ruta.", distance: "", coordinates: [] });
     } finally {
       setCalculating(false);
@@ -937,10 +1234,6 @@ function NewTaskForm({ db, prefill, initialTask = null, currentDriverId, onCance
 
   async function submit(event) {
     event.preventDefault();
-    if (!Number(form.assigned || form.duration || 0)) {
-      onError("Esperá a que OSRM calcule la duracion o revisá las direcciones.");
-      return;
-    }
     let merchandisePdf = initialTask?.merchandisePdf || null;
     if (pdf) {
       if (pdf.type !== "application/pdf") {
@@ -962,10 +1255,10 @@ function NewTaskForm({ db, prefill, initialTask = null, currentDriverId, onCance
       quantities: form.quantities,
       merchandisePdf,
       observations: form.observations,
-      date: form.date,
-      start: form.start,
-      assigned: Number(form.assigned),
-      duration: Number(form.duration),
+      date: canSetSchedule ? (form.date || localISO()) : (initialTask?.date || form.date || localISO()),
+      start: canSetSchedule ? form.start : (initialTask?.start || ""),
+      assigned: 0,
+      duration: 0,
       origin: form.origin,
       destination: form.destination,
       stops: form.stops.map((value) => value.trim()).filter(Boolean),
@@ -982,12 +1275,12 @@ function NewTaskForm({ db, prefill, initialTask = null, currentDriverId, onCance
     });
   }
 
-  const previewDestination = form.destination || "Destino opcional / paradas";
+  const previewDestination = [form.destination, ...form.stops].filter(Boolean).join(" -> ") || "Sin destino";
 
   return (
     <div className="formLayout">
       <form className="taskForm" onSubmit={submit}>
-        <Accordion title="1. Tarea a realizar">
+        <Accordion title="1. Que hay que hacer">
           <label>Titulo</label>
           <input value={form.title} onChange={(event) => update("title", event.target.value)} required />
           <div className="row">
@@ -1002,32 +1295,33 @@ function NewTaskForm({ db, prefill, initialTask = null, currentDriverId, onCance
           </label>
           <label>Observaciones</label>
           <textarea value={form.observations} onChange={(event) => update("observations", event.target.value)} />
+          {canSetSchedule ? (
+            <>
+              <label>Horario <small>(opcional)</small></label>
+              <div className="row">
+                <div><label>Fecha</label><input type="date" value={form.date} onChange={(event) => update("date", event.target.value)} /></div>
+                <div><label>Hora de inicio</label><input type="time" value={form.start} onChange={(event) => update("start", event.target.value)} /></div>
+              </div>
+            </>
+          ) : (
+            <div className="routeNotice">{initialTask?.start ? `Horario programado: ${formatTime24(initialTask.start)}` : "Sin horario. El chofer o supervisor podra programarla."}</div>
+          )}
         </Accordion>
 
-        <Accordion title="2. Fecha y hora">
-          <div className="row">
-            <div><label>Fecha</label><input type="date" value={form.date} onChange={(event) => update("date", event.target.value)} required /></div>
-            <div><label>Hora de inicio</label><input type="time" value={form.start} onChange={(event) => update("start", event.target.value)} required /></div>
-          </div>
-          <label>Duracion calculada por OSRM (min)</label>
-          <input type="number" min="1" value={form.assigned} readOnly />
-          <div className={`routeNotice ${routeInfo.distance ? "success" : ""}`}>{calculating ? "Calculando..." : routeInfo.status}</div>
-        </Accordion>
-
-        <Accordion title="3. Origen y destino">
-          <label>Direccion de origen</label>
-          <AddressSuggest value={form.origin} onChange={(value) => update("origin", value)} required />
-          <QuickAddresses onPick={(value) => update("origin", value)} />
+        <Accordion title="2. A donde hay que ir (opcional)">
+          <label>Destino <small>(opcional)</small></label>
+          <AddressSuggest value={form.destination} onChange={(value) => update("destination", value)} placeholder="Direccion del destino" />
+          <QuickAddresses onPick={(value) => update("destination", value)} />
           <div className="stopsHeader">
-            <label>Paradas <small>(opcional)</small></label>
-            <button className="btn compact" type="button" onClick={addStop}><Plus size={15} /> Agregar parada</button>
+            <label>Otros destinos <small>(opcional)</small></label>
+            {form.stops.length ? <button className="btn compact" type="button" onClick={addStop}><Plus size={15} /> Agregar otro destino</button> : null}
           </div>
           {form.stops.length ? (
             <div className="stopList">
               {form.stops.map((stop, index) => (
                 <div className="stopRow" key={index}>
                   <span className="stopIndex">{index + 1}</span>
-                  <AddressSuggest value={stop} onChange={(value) => updateStop(index, value)} placeholder="Direccion de la parada" />
+                  <AddressSuggest value={stop} onChange={(value) => updateStop(index, value)} placeholder="Direccion del destino adicional" />
                   <button className="iconBtn danger" type="button" onClick={() => removeStop(index)} aria-label="Quitar parada"><Trash2 size={16} /></button>
                 </div>
               ))}
@@ -1035,25 +1329,21 @@ function NewTaskForm({ db, prefill, initialTask = null, currentDriverId, onCance
           ) : (
             <button className="addStopEmpty" type="button" onClick={addStop}>
               <Plus size={18} />
-              Agregar una parada intermedia
+              Agregar otro destino
             </button>
           )}
-          <label>Direccion de destino <small>(opcional)</small></label>
-          <AddressSuggest value={form.destination} onChange={(value) => update("destination", value)} placeholder="Podes dejarla vacia y usar varias paradas" />
-          <QuickAddresses onPick={(value) => update("destination", value)} />
+
+          <div className={`routeNotice ${routeInfo.distance ? "success" : ""}`}>{calculating ? "Calculando..." : routeInfo.status}</div>
         </Accordion>
 
-        <Accordion title="4. Contacto" defaultOpen={false}>
+        <Accordion title="3. Agregar contacto (opcional)" defaultOpen={false}>
           <div className="row">
             <div><label>Persona</label><input value={form.contact} onChange={(event) => update("contact", event.target.value)} /></div>
             <div><label>Telefono</label><input inputMode="tel" value={form.phone} onChange={(event) => update("phone", event.target.value)} /></div>
           </div>
           <label>Area que asigna</label>
           <input value={form.assignedBy} onChange={(event) => update("assignedBy", event.target.value)} />
-          <div className="row">
-            <div><label>Chofer</label><select value={form.driverId} onChange={(event) => update("driverId", event.target.value)}>{db.drivers.map((driver) => <option key={driver.id} value={driver.id}>{driver.name}</option>)}</select></div>
-            <div><label>Vehiculo</label><select value={form.vehicleId} onChange={(event) => update("vehicleId", event.target.value)}>{db.vehicles.map((vehicle) => <option key={vehicle.id} value={vehicle.id}>{vehicle.name} - {vehicle.plate}</option>)}</select></div>
-          </div>
+
         </Accordion>
 
         <div className="actions">
@@ -1064,8 +1354,8 @@ function NewTaskForm({ db, prefill, initialTask = null, currentDriverId, onCance
       <aside className="summaryCard">
         <span className="eyebrow">RESUMEN</span>
         <p><b>{form.title || "Nueva tarea"}</b></p>
-        <p>{form.origin || "Origen"} -> {previewDestination}</p>
-        <p>{form.start || "-"} - {form.duration || "sin calcular"} min{routeInfo.distance ? ` - ${routeInfo.distance} km` : ""}</p>
+        <p>{previewDestination}</p>
+        <p>{form.start ? formatTime24(form.start) : "Sin horario"}{routeInfo.distance ? ` - ${routeInfo.distance} km` : " - distancia sin calcular"}</p>
       </aside>
     </div>
   );
@@ -1078,7 +1368,7 @@ function AddressSuggest({ value, onChange, placeholder = "", required = false })
 
   useEffect(() => {
     const query = value.trim();
-    const localMatches = frequentAddresses.filter((address) => address.toLowerCase().includes(query.toLowerCase()));
+    const localMatches = frequentAddresses.filter((address) => `${address} ${addressLabel(address)}`.toLowerCase().includes(query.toLowerCase()));
     if (query.length < 3) {
       setSuggestions(query ? localMatches : []);
       setLoading(false);
@@ -1089,7 +1379,7 @@ function AddressSuggest({ value, onChange, placeholder = "", required = false })
     const timer = window.setTimeout(async () => {
       setLoading(true);
       try {
-        const response = await fetch(`/api/geocode?q=${encodeURIComponent(query)}&limit=6`, { signal: controller.signal });
+        const response = await appFetch(`/api/geocode?q=${encodeURIComponent(query)}&limit=6`, { signal: controller.signal });
         if (!response.ok) throw new Error("No se pudieron buscar direcciones");
         const results = await response.json();
         const remoteMatches = results.map((result) => result.display_name || result.name).filter(Boolean);
@@ -1137,7 +1427,7 @@ function AddressSuggest({ value, onChange, placeholder = "", required = false })
           {suggestions.map((address) => (
             <button className="addressOption" type="button" key={address} onMouseDown={(event) => event.preventDefault()} onClick={() => pick(address)}>
               <MapPin size={16} />
-              <span>{address}</span>
+              <span>{addressLabel(address)}</span>
             </button>
           ))}
         </div>
@@ -1151,7 +1441,7 @@ function QuickAddresses({ onPick }) {
     <div className="quickAddresses">
       {frequentAddresses.slice(0, 3).map((address) => (
         <button className="quickAddress" type="button" key={address} onClick={() => onPick(address)}>
-          {address}
+          {addressLabel(address)}
         </button>
       ))}
     </div>
@@ -1450,7 +1740,7 @@ function SettingsPanel({ user, users, db, token, revision, onUsers, onUser, onNo
   const [editingUser, setEditingUser] = useState(null);
 
   async function saveUser(payload) {
-    const response = await fetch("/api/users", {
+    const response = await appFetch("/api/users", {
       method: payload.id ? "PUT" : "POST",
       headers: apiHeaders(token, { "content-type": "application/json" }),
       body: JSON.stringify(payload),
