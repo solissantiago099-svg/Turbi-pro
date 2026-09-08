@@ -919,21 +919,24 @@ export default function Home() {
           )}
 
           {view === "nueva" && (
-            <NewTaskForm
-              db={db}
-              prefill={taskPrefill}
-              initialTask={editingTask}
-              currentDriverId={driverId}
-              canAssignSchedule={["admin", "chofer"].includes(currentRole)}
-              onCancel={() => { setEditingTask(null); setView("agenda"); }}
-              onCreate={editingTask ? editTask : addTask}
-              onError={(message) => notify(message, "error")}
-            />
+            <>
+              {currentRole === "admin" ? <ScheduleBlocksPanel blocks={scheduleBlocks} onSave={saveScheduleBlocks} onNotify={notify} compact /> : null}
+              <NewTaskForm
+                db={db}
+                prefill={taskPrefill}
+                initialTask={editingTask}
+                currentDriverId={driverId}
+                canAssignSchedule={["admin", "chofer"].includes(currentRole)}
+                onCancel={() => { setEditingTask(null); setView("agenda"); }}
+                onCreate={editingTask ? editTask : addTask}
+                onError={(message) => notify(message, "error")}
+              />
+            </>
           )}
 
           {view === "vehiculos" && <Records items={db.vehicles} type="vehicle" onSave={saveVehicle} />}
           {view === "choferes" && <Records items={db.drivers} type="driver" users={users} onSave={saveDriver} />}
-          {view === "configuracion" && <SettingsPanel user={user} users={users} db={db} token={token} revision={revision} onUsers={setUsers} onUser={setUser} onNotify={notify} onScheduleBlocks={saveScheduleBlocks} />}
+          {view === "configuracion" && <SettingsPanel user={user} users={users} db={db} token={token} revision={revision} onUsers={setUsers} onUser={setUser} onNotify={notify} />}
         </div>
       </section>
       {toast ? <div className={`toast show ${toast.type === "error" ? "error" : ""}`}>{toast.message}</div> : null}
@@ -1831,7 +1834,7 @@ function DriverForm({ driver, linkedUser, onCancel, onSave }) {
   );
 }
 
-function SettingsPanel({ user, users, db, token, revision, onUsers, onUser, onNotify, onScheduleBlocks }) {
+function SettingsPanel({ user, users, db, token, revision, onUsers, onUser, onNotify }) {
   const [editingUser, setEditingUser] = useState(null);
 
   async function saveUser(payload) {
@@ -1870,7 +1873,6 @@ function SettingsPanel({ user, users, db, token, revision, onUsers, onUser, onNo
           onSave={saveUser}
         />
       ) : null}
-      <ScheduleBlocksPanel blocks={db.settings?.scheduleBlocks || []} onSave={onScheduleBlocks} onNotify={onNotify} />
       <section className="grid">
         <article className="card">
           <span className="eyebrow">USUARIO ACTUAL</span>
@@ -1902,7 +1904,7 @@ function SettingsPanel({ user, users, db, token, revision, onUsers, onUser, onNo
   );
 }
 
-function ScheduleBlocksPanel({ blocks, onSave, onNotify }) {
+function ScheduleBlocksPanel({ blocks, onSave, onNotify, compact = false }) {
   const [form, setForm] = useState({
     date: localISO(),
     start: "10:00",
@@ -1940,11 +1942,11 @@ function ScheduleBlocksPanel({ blocks, onSave, onNotify }) {
   }
 
   return (
-    <article className="card scheduleBlocksCard">
+    <article className={`card scheduleBlocksCard ${compact ? "compact" : ""}`}>
       <div className="formTitle">
         <div>
           <span className="eyebrow">BLOQUEOS DE AGENDA</span>
-          <h2>Horarios no disponibles</h2>
+          <h2>Bloquear horario</h2>
         </div>
       </div>
       <form className="scheduleBlockForm" onSubmit={submit}>

@@ -1464,6 +1464,14 @@ textarea {
   margin-bottom: 16px;
 }
 
+.scheduleBlocksCard.compact {
+  margin-bottom: 18px;
+}
+
+.scheduleBlocksCard.compact .formTitle h2 {
+  font-size: 20px;
+}
+
 .scheduleBlockForm {
   display: grid;
   grid-template-columns: 160px 130px 130px minmax(180px, 1fr) auto;
