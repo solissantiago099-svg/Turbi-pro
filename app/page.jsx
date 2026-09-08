@@ -28,6 +28,40 @@ function formatTime24(value) {
   return `${String(Number(hours)).padStart(2, "0")}:${String(Number(minutes)).padStart(2, "0")} HS`;
 }
 
+function timeToMinutes(value) {
+  const [hours = "0", minutes = "0"] = String(value || "00:00").split(":");
+  return Number(hours) * 60 + Number(minutes);
+}
+
+function scheduleBlocksForDate(blocks, date) {
+  return (blocks || []).filter((block) => block.date === date && block.start && block.end);
+}
+
+function rangesOverlap(startA, endA, startB, endB) {
+  return startA < endB && startB < endA;
+}
+
+function findScheduleBlock(task, blocks) {
+  if (!task?.date || !task?.start) return null;
+  const start = timeToMinutes(task.start);
+  const end = start + Math.max(1, Number(task.assigned || task.duration || 1));
+  return scheduleBlocksForDate(blocks, task.date).find((block) => (
+    rangesOverlap(start, end, timeToMinutes(block.start), timeToMinutes(block.end))
+  )) || null;
+}
+
+function blockForHour(blocks, date, hour) {
+  const start = hour * 60;
+  const end = start + 60;
+  return scheduleBlocksForDate(blocks, date).find((block) => (
+    rangesOverlap(start, end, timeToMinutes(block.start), timeToMinutes(block.end))
+  )) || null;
+}
+
+function blockTimeLabel(block) {
+  return `${formatTime24(block.start)} a ${formatTime24(block.end)}`;
+}
+
 function daysUntil(iso) {
   if (!iso) return 999;
   return Math.ceil((new Date(`${iso}T12:00:00`) - new Date()) / 86400000);
@@ -127,7 +161,7 @@ const seed = {
     maintenance: [{ year: 2026, km: 58000, title: "Cambio de aceite" }],
     plan: [{ title: "Cambio de aceite", nextKm: 68000 }, { title: "Service general", nextKm: 70000 }],
   }],
-  settings: { currentDriverId: 1 },
+  settings: { currentDriverId: 1, scheduleBlocks: [] },
 };
 
 const statusText = {
@@ -323,6 +357,7 @@ export default function Home() {
   const isAdmin = currentRole === "admin";
   const canManageTasks = ["admin", "usuario"].includes(currentRole);
   const driverId = user?.currentDriverId || db.settings?.currentDriverId || 1;
+  const scheduleBlocks = db.settings?.scheduleBlocks || [];
 
   const dayTasks = useMemo(
     () => db.tasks.filter((task) => task.date === selectedDate).sort((a, b) => String(a.start).localeCompare(String(b.start))),
@@ -573,6 +608,13 @@ export default function Home() {
   }
 
   async function persistTask(nextTask, mode = "create") {
+    const previousTask = mode === "edit" ? db.tasks.find((task) => Number(task.id) === Number(nextTask.id)) : null;
+    const scheduleChanged = !previousTask || previousTask.date !== nextTask.date || previousTask.start !== nextTask.start;
+    const blocked = scheduleChanged ? findScheduleBlock(nextTask, scheduleBlocks) : null;
+    if (blocked) {
+      notify(`Ese horario esta bloqueado: ${blocked.title || "Bloqueo operativo"} (${blockTimeLabel(blocked)}).`, "error");
+      return;
+    }
     const driver = db.drivers.find((item) => Number(item.id) === Number(nextTask.driverId));
     const vehicle = db.vehicles.find((item) => Number(item.id) === Number(nextTask.vehicleId));
     if (driver && daysUntil(driver.licenseExpiry) < 0) {
@@ -628,9 +670,15 @@ export default function Home() {
     if (!["admin", "chofer"].includes(currentRole)) throw new Error("Solo el chofer o supervisor puede asignar horario.");
     if (currentRole === "chofer" && Number(task.driverId) !== Number(user.currentDriverId)) throw new Error("Esta tarea no esta asignada a este chofer.");
     const scheduledTask = { ...task, date: date || task.date || localISO(), start, updatedAt: new Date().toISOString() };
+    const blocked = findScheduleBlock(scheduledTask, scheduleBlocks);
+    if (blocked) {
+      notify(`Ese horario esta bloqueado: ${blocked.title || "Bloqueo operativo"} (${blockTimeLabel(blocked)}).`, "error");
+      return false;
+    }
     const nextDb = { ...db, tasks: db.tasks.map((item) => Number(item.id) === Number(task.id) ? scheduledTask : item) };
     await saveState(token, nextDb, revision, "Horario asignado");
     setRouteDate(scheduledTask.date);
+    return true;
   }
 
   async function deleteTask(task) {
@@ -678,6 +726,17 @@ export default function Home() {
       vehicles: exists ? db.vehicles.map((vehicle) => (Number(vehicle.id) === Number(nextVehicle.id) ? nextVehicle : vehicle)) : [...db.vehicles, nextVehicle],
     };
     await saveState(token, nextDb, revision, exists ? "Camioneta actualizada" : "Camioneta creada");
+  }
+
+  async function saveScheduleBlocks(nextBlocks) {
+    const nextDb = {
+      ...db,
+      settings: {
+        ...(db.settings || {}),
+        scheduleBlocks: nextBlocks,
+      },
+    };
+    await saveState(token, nextDb, revision, "Bloqueos actualizados");
   }
 
   if (loading) return <div className="loading">Cargando TAMIZ RUTAS...</div>;
@@ -774,6 +833,7 @@ export default function Home() {
                 date={selectedDate}
                 tasks={dayTasks}
                 db={db}
+                scheduleBlocks={scheduleBlocks}
                 canCreate={canManageTasks}
                 currentUser={user}
                 onFreeSlot={(time) => {
@@ -841,7 +901,7 @@ export default function Home() {
 
           {view === "vehiculos" && <Records items={db.vehicles} type="vehicle" onSave={saveVehicle} />}
           {view === "choferes" && <Records items={db.drivers} type="driver" users={users} onSave={saveDriver} />}
-          {view === "configuracion" && <SettingsPanel user={user} users={users} db={db} token={token} revision={revision} onUsers={setUsers} onUser={setUser} onNotify={notify} />}
+          {view === "configuracion" && <SettingsPanel user={user} users={users} db={db} token={token} revision={revision} onUsers={setUsers} onUser={setUser} onNotify={notify} onScheduleBlocks={saveScheduleBlocks} />}
         </div>
       </section>
       {toast ? <div className={`toast show ${toast.type === "error" ? "error" : ""}`}>{toast.message}</div> : null}
@@ -951,8 +1011,8 @@ function TaskSchedule({ task, onSchedule }) {
     event.preventDefault();
     setSaving(true);
     try {
-      await onSchedule(task, date, start);
-      setEditing(false);
+      const result = await onSchedule(task, date, start);
+      if (result !== false) setEditing(false);
     } finally {
       setSaving(false);
     }
@@ -969,7 +1029,7 @@ function TaskSchedule({ task, onSchedule }) {
     </form>
   );
 }
-function DailySchedule({ date, tasks, db, canCreate, currentUser, onFreeSlot, onStatus, onEdit, onDelete, onSave }) {
+function DailySchedule({ date, tasks, db, scheduleBlocks = [], canCreate, currentUser, onFreeSlot, onStatus, onEdit, onDelete, onSave }) {
   const hours = Array.from({ length: 13 }, (_, index) => index + 7);
   const outside = tasks.filter((task) => {
     const hour = Number(String(task.start || "00:00").split(":")[0]);
@@ -985,16 +1045,17 @@ function DailySchedule({ date, tasks, db, canCreate, currentUser, onFreeSlot, on
         {hours.map((hour) => {
           const hourValue = `${String(hour).padStart(2, "0")}:00`;
           const hourTasks = tasks.filter((task) => Number(String(task.start || "00:00").split(":")[0]) === hour);
+          const blocked = blockForHour(scheduleBlocks, date, hour);
           return (
-            <div className={`scheduleRow ${hourTasks.length ? "occupied" : "free"}`} key={hourValue}>
-              <button className="scheduleTime" onClick={() => canCreate && onFreeSlot(hourValue)} title={`Crear tarea a las ${hourValue}`}>
+            <div className={`scheduleRow ${hourTasks.length ? "occupied" : blocked ? "blocked" : "free"}`} key={hourValue}>
+              <button className="scheduleTime" disabled={!canCreate || Boolean(blocked)} onClick={() => canCreate && !blocked && onFreeSlot(hourValue)} title={blocked ? `Bloqueado: ${blockTimeLabel(blocked)}` : `Crear tarea a las ${hourValue}`}>
                 {hourValue}
               </button>
               <div className="scheduleContent">
                 {hourTasks.length ? hourTasks.map((task) => <DailyTask key={task.id} task={task} db={db} canOperate={canCreate} currentUser={currentUser} onStatus={onStatus} onEdit={onEdit} onDelete={onDelete} onSave={onSave} />) : (
-                  <button className="freeSlot" disabled={!canCreate} onClick={() => onFreeSlot(hourValue)}>
-                    <span>Horario libre</span>
-                    <small>Agregar tarea</small>
+                  <button className={`freeSlot ${blocked ? "blockedSlot" : ""}`} disabled={!canCreate || Boolean(blocked)} onClick={() => onFreeSlot(hourValue)}>
+                    <span>{blocked ? "Horario bloqueado" : "Horario libre"}</span>
+                    <small>{blocked ? `${blocked.title || "Bloqueo operativo"} - ${blockTimeLabel(blocked)}` : "Agregar tarea"}</small>
                   </button>
                 )}
               </div>
@@ -1724,7 +1785,7 @@ function DriverForm({ driver, linkedUser, onCancel, onSave }) {
   );
 }
 
-function SettingsPanel({ user, users, db, token, revision, onUsers, onUser, onNotify }) {
+function SettingsPanel({ user, users, db, token, revision, onUsers, onUser, onNotify, onScheduleBlocks }) {
   const [editingUser, setEditingUser] = useState(null);
 
   async function saveUser(payload) {
@@ -1763,6 +1824,7 @@ function SettingsPanel({ user, users, db, token, revision, onUsers, onUser, onNo
           onSave={saveUser}
         />
       ) : null}
+      <ScheduleBlocksPanel blocks={db.settings?.scheduleBlocks || []} onSave={onScheduleBlocks} onNotify={onNotify} />
       <section className="grid">
         <article className="card">
           <span className="eyebrow">USUARIO ACTUAL</span>
@@ -1791,6 +1853,85 @@ function SettingsPanel({ user, users, db, token, revision, onUsers, onUser, onNo
         ))}
       </section>
     </>
+  );
+}
+
+function ScheduleBlocksPanel({ blocks, onSave, onNotify }) {
+  const [form, setForm] = useState({
+    date: localISO(),
+    start: "10:00",
+    end: "14:00",
+    title: "",
+  });
+  const sortedBlocks = [...(blocks || [])].sort((a, b) => `${a.date} ${a.start}`.localeCompare(`${b.date} ${b.start}`));
+
+  function update(name, value) {
+    setForm((current) => ({ ...current, [name]: value }));
+  }
+
+  async function submit(event) {
+    event.preventDefault();
+    if (timeToMinutes(form.start) >= timeToMinutes(form.end)) {
+      onNotify("El horario de fin debe ser posterior al inicio.", "error");
+      return;
+    }
+    await onSave([
+      ...(blocks || []),
+      {
+        id: Date.now(),
+        date: form.date,
+        start: form.start,
+        end: form.end,
+        title: form.title.trim() || "Bloqueo operativo",
+        createdAt: new Date().toISOString(),
+      },
+    ]);
+    setForm((current) => ({ ...current, title: "" }));
+  }
+
+  async function removeBlock(blockId) {
+    await onSave((blocks || []).filter((block) => Number(block.id) !== Number(blockId)));
+  }
+
+  return (
+    <article className="card scheduleBlocksCard">
+      <div className="formTitle">
+        <div>
+          <span className="eyebrow">BLOQUEOS DE AGENDA</span>
+          <h2>Horarios no disponibles</h2>
+        </div>
+      </div>
+      <form className="scheduleBlockForm" onSubmit={submit}>
+        <div>
+          <label>Dia</label>
+          <input type="date" value={form.date} onChange={(event) => update("date", event.target.value)} required />
+        </div>
+        <div>
+          <label>Desde</label>
+          <input type="time" value={form.start} onChange={(event) => update("start", event.target.value)} required />
+        </div>
+        <div>
+          <label>Hasta</label>
+          <input type="time" value={form.end} onChange={(event) => update("end", event.target.value)} required />
+        </div>
+        <div>
+          <label>Motivo</label>
+          <input value={form.title} onChange={(event) => update("title", event.target.value)} placeholder="Evento, mantenimiento, carga interna..." />
+        </div>
+        <button className="btn primary" type="submit"><Plus size={16} /> Bloquear</button>
+      </form>
+      <div className="scheduleBlocksList">
+        {sortedBlocks.length ? sortedBlocks.map((block) => (
+          <div className="scheduleBlockItem" key={block.id}>
+            <div>
+              <b>{block.title || "Bloqueo operativo"}</b>
+              <span>{new Date(`${block.date}T12:00:00`).toLocaleDateString("es-AR", { weekday: "short", day: "numeric", month: "short" })} - {blockTimeLabel(block)}</span>
+            </div>
+            <button className="iconBtn danger" type="button" onClick={() => removeBlock(block.id)} aria-label="Quitar bloqueo"><Trash2 size={16} /></button>
+          </div>
+        )) : <p>No hay horarios bloqueados.</p>}
+      </div>
+    </article>
   );
 }
 

@@ -537,6 +537,11 @@ textarea {
   color: var(--muted);
 }
 
+.scheduleRow.blocked .scheduleTime {
+  color: var(--red);
+  background: #f8eeee;
+}
+
 .scheduleContent {
   min-width: 0;
   padding: 8px;
@@ -558,6 +563,15 @@ textarea {
   border-color: var(--green);
   background: #f0e2dd;
   transform: translateY(-1px);
+}
+
+.blockedSlot,
+.blockedSlot:disabled {
+  border-color: #ddb8bd;
+  background: #fff0f1;
+  color: var(--red);
+  cursor: not-allowed;
+  opacity: 1;
 }
 
 .freeSlot span,
@@ -1391,6 +1405,54 @@ textarea {
   align-items: center;
 }
 
+.scheduleBlocksCard {
+  margin-bottom: 16px;
+}
+
+.scheduleBlockForm {
+  display: grid;
+  grid-template-columns: 160px 130px 130px minmax(180px, 1fr) auto;
+  gap: 10px;
+  align-items: end;
+}
+
+.scheduleBlocksList {
+  display: grid;
+  gap: 9px;
+  margin-top: 14px;
+}
+
+.scheduleBlocksList p {
+  margin: 0;
+  color: var(--muted);
+}
+
+.scheduleBlockItem {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  padding: 11px 12px;
+  background: #fffdf8;
+}
+
+.scheduleBlockItem b,
+.scheduleBlockItem span {
+  display: block;
+}
+
+.scheduleBlockItem b {
+  color: var(--ink);
+}
+
+.scheduleBlockItem span {
+  margin-top: 3px;
+  color: var(--muted);
+  font-size: 13px;
+}
+
 .toast {
   position: fixed;
   right: 18px;
@@ -1723,6 +1785,14 @@ textarea {
 
   .maintenanceRow {
     grid-template-columns: 1fr;
+  }
+
+  .scheduleBlockForm {
+    grid-template-columns: 1fr;
+  }
+
+  .scheduleBlockItem {
+    align-items: stretch;
   }
 
   .installBanner {
