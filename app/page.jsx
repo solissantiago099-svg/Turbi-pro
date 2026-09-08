@@ -944,7 +944,7 @@ export default function Home() {
               prefill={taskPrefill}
               initialTask={editingTask}
               currentDriverId={driverId}
-              canAssignSchedule={["admin", "chofer"].includes(currentRole)}
+              canAssignSchedule={["admin", "usuario", "chofer"].includes(currentRole)}
               canManageBlocks={currentRole === "admin"}
               scheduleBlocks={scheduleBlocks}
               onScheduleBlocks={saveScheduleBlocks}
