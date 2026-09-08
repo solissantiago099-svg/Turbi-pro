@@ -112,6 +112,14 @@ function isScheduleOnlyChange(previousTask, nextTask, user) {
   return JSON.stringify(previousContent) === JSON.stringify(nextContent);
 }
 
+function isStatusOnlyChange(previousTask, nextTask, user) {
+  if (normalizedRole(user?.role) !== "chofer") return false;
+  if (Number(previousTask.driverId) !== Number(user.currentDriverId)) return false;
+  const { status: previousStatus, updatedAt: previousUpdatedAt, ...previousContent } = previousTask;
+  const { status: nextStatus, updatedAt: nextUpdatedAt, ...nextContent } = nextTask;
+  return previousStatus !== nextStatus && JSON.stringify(previousContent) === JSON.stringify(nextContent);
+}
+
 function isAdmin(user) {
   return normalizedRole(user?.role) === "admin";
 }
@@ -319,15 +327,18 @@ async function writeState(request, env) {
         nextTask.assignedByUserName = user.name || user.username || user.email || "Usuario";
         continue;
       }
-      const { status: previousStatus, ...previousContent } = previousTask;
-      const { status: nextStatus, ...nextContent } = nextTask;
+      const { status: previousStatus, updatedAt: previousUpdatedAt, ...previousContent } = previousTask;
+      const { status: nextStatus, updatedAt: nextUpdatedAt, ...nextContent } = nextTask;
+      if (previousStatus !== nextStatus && !isStatusOnlyChange(previousTask, nextTask, user)) {
+        return Response.json({ error: "Solo el chofer asignado puede iniciar o finalizar tareas." }, { status: 403 });
+      }
       if (JSON.stringify(previousContent) !== JSON.stringify(nextContent)) {
         if (!isScheduleOnlyChange(previousTask, nextTask, user) && (!previousTask.assignedByUserId || String(previousTask.assignedByUserId) !== String(user.id))) {
           return Response.json({ error: "Solo puede editar la tarea el usuario que la asigno." }, { status: 403 });
         }
-        nextTask.assignedByUserId = previousTask.assignedByUserId;
-        nextTask.assignedByUserName = previousTask.assignedByUserName;
       }
+      nextTask.assignedByUserId = previousTask.assignedByUserId;
+      nextTask.assignedByUserName = previousTask.assignedByUserName;
     }
   } else {
     for (const nextTask of nextData.tasks) {

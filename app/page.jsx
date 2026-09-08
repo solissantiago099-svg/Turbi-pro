@@ -356,6 +356,7 @@ export default function Home() {
   const currentView = visibleViews.find((item) => item.id === view) || visibleViews[0] || views[0];
   const isAdmin = currentRole === "admin";
   const canManageTasks = ["admin", "usuario"].includes(currentRole);
+  const canChangeTaskStatus = currentRole === "chofer";
   const driverId = user?.currentDriverId || db.settings?.currentDriverId || 1;
   const scheduleBlocks = db.settings?.scheduleBlocks || [];
 
@@ -663,6 +664,10 @@ export default function Home() {
   }
 
   async function updateTask(task, status) {
+    if (currentRole !== "chofer" || Number(task.driverId) !== Number(user.currentDriverId)) {
+      notify("Solo el chofer asignado puede iniciar o finalizar esta tarea.", "error");
+      return;
+    }
     const nextDb = { ...db, tasks: db.tasks.map((item) => (item.id === task.id ? { ...item, status, updatedAt: new Date().toISOString() } : item)) };
     await saveState(token, nextDb, revision, "Estado actualizado");
   }
@@ -837,6 +842,7 @@ export default function Home() {
                 scheduleBlocks={scheduleBlocks}
                 canCreate={canManageTasks}
                 currentUser={user}
+                canChangeStatus={false}
                 onFreeSlot={(time) => {
                   setEditingTask(null);
                   setTaskPrefill({ date: selectedDate, time });
@@ -871,21 +877,21 @@ export default function Home() {
                 </div>
               </div>
               <RouteTaskGroup title="Tareas del dia" count={routeTasks.filter((task) => task.start && task.status !== "realizada").length} defaultOpen>
-                <TaskList tasks={routeTasks.filter((task) => task.start && task.status !== "realizada")} db={db} currentUser={user} onStatus={updateTask} onSchedule={scheduleTask} canSchedule={false} canOperate onEdit={(task) => {
+                <TaskList tasks={routeTasks.filter((task) => task.start && task.status !== "realizada")} db={db} currentUser={user} onStatus={updateTask} onSchedule={scheduleTask} canSchedule={false} canOperate canChangeStatus={canChangeTaskStatus} onEdit={(task) => {
                   setEditingTask(task);
                   setTaskPrefill({ date: task.date, time: task.start });
                   setView("nueva");
                 }} />
               </RouteTaskGroup>
               <RouteTaskGroup title="Tareas sin horario" count={routeTasks.filter((task) => !task.start && task.status !== "realizada").length} defaultOpen>
-                <TaskList tasks={routeTasks.filter((task) => !task.start && task.status !== "realizada")} db={db} currentUser={user} onStatus={updateTask} onSchedule={scheduleTask} canSchedule={["admin", "chofer"].includes(currentRole)} canOperate onEdit={(task) => {
+                <TaskList tasks={routeTasks.filter((task) => !task.start && task.status !== "realizada")} db={db} currentUser={user} onStatus={updateTask} onSchedule={scheduleTask} canSchedule={["admin", "chofer"].includes(currentRole)} canOperate canChangeStatus={canChangeTaskStatus} onEdit={(task) => {
                   setEditingTask(task);
                   setTaskPrefill({ date: task.date, time: task.start });
                   setView("nueva");
                 }} />
               </RouteTaskGroup>
               <RouteTaskGroup title="Tareas realizadas" count={routeTasks.filter((task) => task.status === "realizada").length}>
-                <TaskList tasks={routeTasks.filter((task) => task.status === "realizada")} db={db} currentUser={user} onStatus={updateTask} onSchedule={scheduleTask} canSchedule={false} canOperate onEdit={(task) => {
+                <TaskList tasks={routeTasks.filter((task) => task.status === "realizada")} db={db} currentUser={user} onStatus={updateTask} onSchedule={scheduleTask} canSchedule={false} canOperate canChangeStatus={canChangeTaskStatus} onEdit={(task) => {
                   setEditingTask(task);
                   setTaskPrefill({ date: task.date, time: task.start });
                   setView("nueva");
@@ -956,7 +962,7 @@ function RouteTaskGroup({ title, count, defaultOpen = false, children }) {
     </details>
   );
 }
-function TaskList({ tasks, db, currentUser, onStatus, onEdit, onSchedule, canSchedule, canOperate }) {
+function TaskList({ tasks, db, currentUser, onStatus, onEdit, onSchedule, canSchedule, canOperate, canChangeStatus }) {
   if (!tasks.length) return <div className="empty">No hay tareas para este dia.</div>;
   return (
     <section className="routeTasks">
@@ -965,6 +971,7 @@ function TaskList({ tasks, db, currentUser, onStatus, onEdit, onSchedule, canSch
 
         const stops = (task.stops || []).map((stop) => (typeof stop === "string" ? stop : stop.address)).filter(Boolean);
         const destinations = [task.destination, ...stops].filter(Boolean);
+        const canOperateThisTask = canChangeStatus && Number(task.driverId) === Number(currentUser?.currentDriverId);
         return (
           <details className={`driverTaskCard ${task.status === "realizada" ? "completed" : ""}`} key={task.id}>
             <summary className="driverTaskHeader">
@@ -995,7 +1002,7 @@ function TaskList({ tasks, db, currentUser, onStatus, onEdit, onSchedule, canSch
                 <a className="iconBtn navigationBtn" href={taskGoogleMapsURL(task)} target="_blank" rel="noreferrer" aria-label="Abrir navegacion en Google Maps" title="Abrir navegacion en Google Maps"><MapPin size={19} /></a>
                 {!task.start && canSchedule ? <TaskSchedule task={task} onSchedule={onSchedule} /> : null}
                 {taskOwnedBy(task, currentUser) ? <button className="btn" type="button" onClick={() => onEdit(task)}><Edit3 size={15} /> Editar</button> : null}
-                {canOperate && task.status !== "realizada" ? (
+                {canOperateThisTask && task.status !== "realizada" ? (
                   <>
                     {task.status !== "en-trabajo" ? <button className="btn" onClick={() => onStatus(task, "en-trabajo")}>Iniciar</button> : null}
                     {task.status !== "realizada" ? <button className="btn primary" onClick={() => onStatus(task, "realizada")}>Finalizar</button> : null}
@@ -1037,7 +1044,7 @@ function TaskSchedule({ task, onSchedule }) {
     </form>
   );
 }
-function DailySchedule({ date, tasks, db, scheduleBlocks = [], canCreate, currentUser, onFreeSlot, onStatus, onEdit, onDelete, onSave }) {
+function DailySchedule({ date, tasks, db, scheduleBlocks = [], canCreate, canChangeStatus, currentUser, onFreeSlot, onStatus, onEdit, onDelete, onSave }) {
   const hours = Array.from({ length: 13 }, (_, index) => index + 7);
   const outside = tasks.filter((task) => {
     const hour = Number(String(task.start || "00:00").split(":")[0]);
@@ -1060,7 +1067,7 @@ function DailySchedule({ date, tasks, db, scheduleBlocks = [], canCreate, curren
                 {hourValue}
               </button>
               <div className="scheduleContent">
-                {hourTasks.length ? hourTasks.map((task) => <DailyTask key={task.id} task={task} db={db} canOperate={canCreate} currentUser={currentUser} onStatus={onStatus} onEdit={onEdit} onDelete={onDelete} onSave={onSave} />) : (
+                {hourTasks.length ? hourTasks.map((task) => <DailyTask key={task.id} task={task} db={db} canOperate={canCreate} canChangeStatus={canChangeStatus} currentUser={currentUser} onStatus={onStatus} onEdit={onEdit} onDelete={onDelete} onSave={onSave} />) : (
                   <button className={`freeSlot ${blocked ? "blockedSlot" : ""}`} disabled={!canCreate || Boolean(blocked)} onClick={() => onFreeSlot(hourValue)}>
                     <span>{blocked ? "Horario bloqueado" : "Horario libre"}</span>
                     <small>{blocked ? `${blocked.title || "Bloqueo operativo"} - ${blockTimeLabel(blocked)}` : "Agregar tarea"}</small>
@@ -1074,7 +1081,7 @@ function DailySchedule({ date, tasks, db, scheduleBlocks = [], canCreate, curren
           <div className="scheduleRow occupied" key={`outside-${task.id}`}>
             <span className="scheduleTime">{task.start}</span>
             <div className="scheduleContent">
-              <DailyTask task={task} db={db} canOperate={canCreate} currentUser={currentUser} onStatus={onStatus} onEdit={onEdit} onDelete={onDelete} onSave={onSave} outside />
+              <DailyTask task={task} db={db} canOperate={canCreate} canChangeStatus={canChangeStatus} currentUser={currentUser} onStatus={onStatus} onEdit={onEdit} onDelete={onDelete} onSave={onSave} outside />
             </div>
           </div>
         ))}
@@ -1083,12 +1090,13 @@ function DailySchedule({ date, tasks, db, scheduleBlocks = [], canCreate, curren
   );
 }
 
-function DailyTask({ task, canOperate, currentUser, onStatus, onDelete, onSave, outside = false }) {
+function DailyTask({ task, canOperate, canChangeStatus, currentUser, onStatus, onDelete, onSave, outside = false }) {
   const [editing, setEditing] = useState(false);
   const [saving, setSaving] = useState(false);
   const [draft, setDraft] = useState(null);
   const stops = (task.stops || []).map((stop) => (typeof stop === "string" ? stop : stop.address)).filter(Boolean);
   const canEdit = canOperate && taskOwnedBy(task, currentUser);
+  const canOperateThisTask = canChangeStatus && Number(task.driverId) === Number(currentUser?.currentDriverId);
 
   function beginEditing() {
     setDraft({
@@ -1183,8 +1191,8 @@ function DailyTask({ task, canOperate, currentUser, onStatus, onDelete, onSave, 
               {task.merchandisePdf?.data ? <a className="btn" href={task.merchandisePdf.data} download={task.merchandisePdf.name}>Abrir PDF</a> : null}
               {canEdit ? <button className="btn" type="button" onClick={beginEditing}><Edit3 size={15} /> Editar</button> : null}
               {canOperate ? <button className="iconBtn danger" type="button" onClick={() => onDelete(task)} aria-label="Eliminar tarea" title="Eliminar tarea"><Trash2 size={16} /></button> : null}
-              {canOperate && task.status !== "realizada" && task.status !== "en-trabajo" ? <button className="btn" onClick={() => onStatus(task, "en-trabajo")}>Iniciar</button> : null}
-              {canOperate && task.status !== "realizada" ? <button className="btn primary" onClick={() => onStatus(task, "realizada")}>Finalizar</button> : null}
+              {canOperateThisTask && task.status !== "realizada" && task.status !== "en-trabajo" ? <button className="btn" onClick={() => onStatus(task, "en-trabajo")}>Iniciar</button> : null}
+              {canOperateThisTask && task.status !== "realizada" ? <button className="btn primary" onClick={() => onStatus(task, "realizada")}>Finalizar</button> : null}
             </>
           )}
         </div>
