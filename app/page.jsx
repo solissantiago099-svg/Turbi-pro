@@ -919,19 +919,19 @@ export default function Home() {
           )}
 
           {view === "nueva" && (
-            <>
-              {currentRole === "admin" ? <ScheduleBlocksPanel blocks={scheduleBlocks} onSave={saveScheduleBlocks} onNotify={notify} compact /> : null}
-              <NewTaskForm
-                db={db}
-                prefill={taskPrefill}
-                initialTask={editingTask}
-                currentDriverId={driverId}
-                canAssignSchedule={["admin", "chofer"].includes(currentRole)}
-                onCancel={() => { setEditingTask(null); setView("agenda"); }}
-                onCreate={editingTask ? editTask : addTask}
-                onError={(message) => notify(message, "error")}
-              />
-            </>
+            <NewTaskForm
+              db={db}
+              prefill={taskPrefill}
+              initialTask={editingTask}
+              currentDriverId={driverId}
+              canAssignSchedule={["admin", "chofer"].includes(currentRole)}
+              canManageBlocks={currentRole === "admin"}
+              scheduleBlocks={scheduleBlocks}
+              onScheduleBlocks={saveScheduleBlocks}
+              onCancel={() => { setEditingTask(null); setView("agenda"); }}
+              onCreate={editingTask ? editTask : addTask}
+              onError={(message) => notify(message, "error")}
+            />
           )}
 
           {view === "vehiculos" && <Records items={db.vehicles} type="vehicle" onSave={saveVehicle} />}
@@ -1259,7 +1259,7 @@ function taskToForm(task, prefill, currentDriverId, db) {
   };
 }
 
-function NewTaskForm({ db, prefill, initialTask = null, currentDriverId, canAssignSchedule, onCancel, onCreate, onError }) {
+function NewTaskForm({ db, prefill, initialTask = null, currentDriverId, canAssignSchedule, canManageBlocks = false, scheduleBlocks = [], onScheduleBlocks, onCancel, onCreate, onError }) {
   const [form, setForm] = useState(() => taskToForm(initialTask, prefill, currentDriverId, db));
   const [routeInfo, setRouteInfo] = useState({ status: "Google Maps usara tu ubicacion actual para iniciar el recorrido.", distance: "", coordinates: [] });
   const [calculating, setCalculating] = useState(false);
@@ -1409,6 +1409,16 @@ function NewTaskForm({ db, prefill, initialTask = null, currentDriverId, canAssi
                 <div><label>Fecha</label><input type="date" value={form.date} onChange={(event) => update("date", event.target.value)} /></div>
                 <div><label>Hora de inicio</label><input type="time" value={form.start} onChange={(event) => update("start", event.target.value)} /></div>
               </div>
+              {canManageBlocks ? (
+                <ScheduleBlocksPanel
+                  blocks={scheduleBlocks}
+                  date={form.date}
+                  start={form.start}
+                  onSave={onScheduleBlocks}
+                  onNotify={onError}
+                  compact
+                />
+              ) : null}
             </>
           ) : (
             <div className="routeNotice">{initialTask?.start ? `Horario programado: ${formatTime24(initialTask.start)}` : "Sin horario. El chofer o supervisor podra programarla."}</div>
@@ -1904,14 +1914,23 @@ function SettingsPanel({ user, users, db, token, revision, onUsers, onUser, onNo
   );
 }
 
-function ScheduleBlocksPanel({ blocks, onSave, onNotify, compact = false }) {
+function ScheduleBlocksPanel({ blocks, onSave, onNotify, compact = false, date = "", start = "" }) {
   const [form, setForm] = useState({
-    date: localISO(),
-    start: "10:00",
+    date: date || localISO(),
+    start: start || "10:00",
     end: "14:00",
     title: "",
   });
   const sortedBlocks = [...(blocks || [])].sort((a, b) => `${a.date} ${a.start}`.localeCompare(`${b.date} ${b.start}`));
+
+  useEffect(() => {
+    if (!compact) return;
+    setForm((current) => ({
+      ...current,
+      date: date || current.date,
+      start: start || current.start,
+    }));
+  }, [compact, date, start]);
 
   function update(name, value) {
     setForm((current) => ({ ...current, [name]: value }));
@@ -1941,14 +1960,8 @@ function ScheduleBlocksPanel({ blocks, onSave, onNotify, compact = false }) {
     await onSave((blocks || []).filter((block) => Number(block.id) !== Number(blockId)));
   }
 
-  return (
-    <article className={`card scheduleBlocksCard ${compact ? "compact" : ""}`}>
-      <div className="formTitle">
-        <div>
-          <span className="eyebrow">BLOQUEOS DE AGENDA</span>
-          <h2>Bloquear horario</h2>
-        </div>
-      </div>
+  const content = (
+    <>
       <form className="scheduleBlockForm" onSubmit={submit}>
         <div>
           <label>Dia</label>
@@ -1979,6 +1992,33 @@ function ScheduleBlocksPanel({ blocks, onSave, onNotify, compact = false }) {
           </div>
         )) : <p>No hay horarios bloqueados.</p>}
       </div>
+    </>
+  );
+
+  if (compact) {
+    return (
+      <details className="scheduleBlockDisclosure">
+        <summary>
+          <span>
+            <b>Bloquear este horario</b>
+            <small>Reservar una franja para que no se puedan cargar tareas.</small>
+          </span>
+          <ChevronDown size={18} aria-hidden="true" />
+        </summary>
+        <div className="scheduleBlockDisclosureBody">{content}</div>
+      </details>
+    );
+  }
+
+  return (
+    <article className="card scheduleBlocksCard">
+      <div className="formTitle">
+        <div>
+          <span className="eyebrow">BLOQUEOS DE AGENDA</span>
+          <h2>Bloquear horario</h2>
+        </div>
+      </div>
+      {content}
     </article>
   );
 }
