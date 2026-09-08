@@ -457,6 +457,17 @@ textarea {
   box-shadow: inset 0 0 0 1px var(--green), 0 12px 26px rgba(43, 66, 56, 0.13);
 }
 
+.dayChip.completed {
+  border-color: #9faa68;
+  background: linear-gradient(180deg, #f4f6df, #e9edc6);
+}
+
+.dayChip.completed.active {
+  border-color: var(--green);
+  background: linear-gradient(180deg, #edf4d9, #dfe8b6);
+  box-shadow: inset 0 0 0 1px var(--green), 0 12px 26px rgba(43, 66, 56, 0.16);
+}
+
 .dayChip span,
 .dayChip small {
   display: block;
@@ -473,6 +484,11 @@ textarea {
   border-radius: 50%;
   background: var(--green);
   box-shadow: 0 0 0 1px rgba(43, 66, 56, 0.2);
+}
+
+.dayChip.completed .taskDot {
+  background: #2d6b3c;
+  box-shadow: 0 0 0 1px rgba(45, 107, 60, 0.24);
 }
 
 .schedule {
@@ -591,6 +607,21 @@ textarea {
   background: var(--paper);
   overflow: hidden;
   box-shadow: 0 6px 18px rgba(42, 41, 39, 0.06);
+}
+
+.dailyTask.completed {
+  border-color: #ccd7a0;
+  border-left-color: #2d6b3c;
+  background: #f5f8e8;
+}
+
+.dailyTask.completed summary {
+  background: linear-gradient(180deg, #f8faed, #eef4d8);
+}
+
+.dailyTask.completed .dailyTaskTime,
+.dailyTask.completed .dailyTaskMain b {
+  color: #2d6b3c;
 }
 
 .dailyTask + .dailyTask {
@@ -769,6 +800,16 @@ textarea {
   background: var(--paper);
   box-shadow: var(--shadow-sm);
   overflow: hidden;
+}
+
+.driverTaskCard.completed {
+  border-color: #ccd7a0;
+  background: #f5f8e8;
+}
+
+.driverTaskCard.completed .driverTaskTime,
+.driverTaskCard.completed .driverTaskTitle {
+  color: #2d6b3c;
 }
 
 .driverTaskBody {

@@ -404,6 +404,7 @@ export default function Home() {
         label: date.toLocaleDateString("es-AR", { weekday: "short" }).replace(".", ""),
         day: date.getDate(),
         count: db.tasks.filter((task) => task.date === iso).length,
+        completed: db.tasks.some((task) => task.date === iso) && db.tasks.filter((task) => task.date === iso).every((task) => task.status === "realizada"),
       };
     });
   }, [db.tasks]);
@@ -662,7 +663,7 @@ export default function Home() {
   }
 
   async function updateTask(task, status) {
-    const nextDb = { ...db, tasks: db.tasks.map((item) => (item.id === task.id ? { ...item, status } : item)) };
+    const nextDb = { ...db, tasks: db.tasks.map((item) => (item.id === task.id ? { ...item, status, updatedAt: new Date().toISOString() } : item)) };
     await saveState(token, nextDb, revision, "Estado actualizado");
   }
   async function scheduleTask(task, date, start) {
@@ -821,7 +822,7 @@ export default function Home() {
               </div>
               <div className="week">
                 {week.map((day) => (
-                  <button key={day.iso} className={`dayChip ${selectedDate === day.iso ? "active" : ""}`} onClick={() => setSelectedDate(day.iso)}>
+                  <button key={day.iso} className={`dayChip ${selectedDate === day.iso ? "active" : ""} ${day.completed ? "completed" : ""}`} onClick={() => setSelectedDate(day.iso)}>
                     {day.count > 0 ? <span className="taskDot" aria-label={`${day.count} tareas asignadas`} title={`${day.count} tareas asignadas`} /> : null}
                     <span>{day.label}</span>
                     <b>{day.day}</b>
@@ -869,15 +870,22 @@ export default function Home() {
                   </button>
                 </div>
               </div>
-              <RouteTaskGroup title="Tareas del dia" count={routeTasks.filter((task) => task.start).length} defaultOpen>
-                <TaskList tasks={routeTasks.filter((task) => task.start)} db={db} currentUser={user} onStatus={updateTask} onSchedule={scheduleTask} canSchedule={false} canOperate onEdit={(task) => {
+              <RouteTaskGroup title="Tareas del dia" count={routeTasks.filter((task) => task.start && task.status !== "realizada").length} defaultOpen>
+                <TaskList tasks={routeTasks.filter((task) => task.start && task.status !== "realizada")} db={db} currentUser={user} onStatus={updateTask} onSchedule={scheduleTask} canSchedule={false} canOperate onEdit={(task) => {
                   setEditingTask(task);
                   setTaskPrefill({ date: task.date, time: task.start });
                   setView("nueva");
                 }} />
               </RouteTaskGroup>
-              <RouteTaskGroup title="Tareas sin horario" count={routeTasks.filter((task) => !task.start).length} defaultOpen>
-                <TaskList tasks={routeTasks.filter((task) => !task.start)} db={db} currentUser={user} onStatus={updateTask} onSchedule={scheduleTask} canSchedule={["admin", "chofer"].includes(currentRole)} canOperate onEdit={(task) => {
+              <RouteTaskGroup title="Tareas sin horario" count={routeTasks.filter((task) => !task.start && task.status !== "realizada").length} defaultOpen>
+                <TaskList tasks={routeTasks.filter((task) => !task.start && task.status !== "realizada")} db={db} currentUser={user} onStatus={updateTask} onSchedule={scheduleTask} canSchedule={["admin", "chofer"].includes(currentRole)} canOperate onEdit={(task) => {
+                  setEditingTask(task);
+                  setTaskPrefill({ date: task.date, time: task.start });
+                  setView("nueva");
+                }} />
+              </RouteTaskGroup>
+              <RouteTaskGroup title="Tareas realizadas" count={routeTasks.filter((task) => task.status === "realizada").length}>
+                <TaskList tasks={routeTasks.filter((task) => task.status === "realizada")} db={db} currentUser={user} onStatus={updateTask} onSchedule={scheduleTask} canSchedule={false} canOperate onEdit={(task) => {
                   setEditingTask(task);
                   setTaskPrefill({ date: task.date, time: task.start });
                   setView("nueva");
@@ -958,7 +966,7 @@ function TaskList({ tasks, db, currentUser, onStatus, onEdit, onSchedule, canSch
         const stops = (task.stops || []).map((stop) => (typeof stop === "string" ? stop : stop.address)).filter(Boolean);
         const destinations = [task.destination, ...stops].filter(Boolean);
         return (
-          <details className="driverTaskCard" key={task.id}>
+          <details className={`driverTaskCard ${task.status === "realizada" ? "completed" : ""}`} key={task.id}>
             <summary className="driverTaskHeader">
               <span className="driverTaskHeading">
                 <span className="driverTaskTime">{task.start ? formatTime24(task.start) : "Sin horario"}</span>
@@ -987,7 +995,7 @@ function TaskList({ tasks, db, currentUser, onStatus, onEdit, onSchedule, canSch
                 <a className="iconBtn navigationBtn" href={taskGoogleMapsURL(task)} target="_blank" rel="noreferrer" aria-label="Abrir navegacion en Google Maps" title="Abrir navegacion en Google Maps"><MapPin size={19} /></a>
                 {!task.start && canSchedule ? <TaskSchedule task={task} onSchedule={onSchedule} /> : null}
                 {taskOwnedBy(task, currentUser) ? <button className="btn" type="button" onClick={() => onEdit(task)}><Edit3 size={15} /> Editar</button> : null}
-                {canOperate ? (
+                {canOperate && task.status !== "realizada" ? (
                   <>
                     {task.status !== "en-trabajo" ? <button className="btn" onClick={() => onStatus(task, "en-trabajo")}>Iniciar</button> : null}
                     {task.status !== "realizada" ? <button className="btn primary" onClick={() => onStatus(task, "realizada")}>Finalizar</button> : null}
@@ -1124,7 +1132,7 @@ function DailyTask({ task, canOperate, currentUser, onStatus, onDelete, onSave, 
   }
 
   return (
-    <details className={`dailyTask ${outside ? "outside" : ""}`}>
+    <details className={`dailyTask ${outside ? "outside" : ""} ${task.status === "realizada" ? "completed" : ""}`}>
       <summary>
         <span className="dailyTaskTime">{task.start}</span>
         <span className="dailyTaskMain">
@@ -1175,7 +1183,7 @@ function DailyTask({ task, canOperate, currentUser, onStatus, onDelete, onSave, 
               {task.merchandisePdf?.data ? <a className="btn" href={task.merchandisePdf.data} download={task.merchandisePdf.name}>Abrir PDF</a> : null}
               {canEdit ? <button className="btn" type="button" onClick={beginEditing}><Edit3 size={15} /> Editar</button> : null}
               {canOperate ? <button className="iconBtn danger" type="button" onClick={() => onDelete(task)} aria-label="Eliminar tarea" title="Eliminar tarea"><Trash2 size={16} /></button> : null}
-              {canOperate && task.status !== "en-trabajo" ? <button className="btn" onClick={() => onStatus(task, "en-trabajo")}>Iniciar</button> : null}
+              {canOperate && task.status !== "realizada" && task.status !== "en-trabajo" ? <button className="btn" onClick={() => onStatus(task, "en-trabajo")}>Iniciar</button> : null}
               {canOperate && task.status !== "realizada" ? <button className="btn primary" onClick={() => onStatus(task, "realizada")}>Finalizar</button> : null}
             </>
           )}
