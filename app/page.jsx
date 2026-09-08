@@ -1285,7 +1285,7 @@ function NewTaskForm({ db, prefill, initialTask = null, currentDriverId, canAssi
   const [calculating, setCalculating] = useState(false);
   const [pdf, setPdf] = useState(null);
   const isEditing = Boolean(initialTask);
-  const canSetSchedule = canAssignSchedule && !initialTask?.start;
+  const canSetSchedule = canAssignSchedule;
   const formResetKey = [
     initialTask?.id || "new",
     prefill.date || "",
