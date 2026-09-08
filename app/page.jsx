@@ -83,6 +83,11 @@ function canAccessView(role, view) {
 function taskOwnedBy(task, user) {
   return Boolean(task?.assignedByUserId && user?.id && String(task.assignedByUserId) === String(user.id));
 }
+
+function canEditTask(task, user) {
+  return normalizedRole(user?.role) === "admin" || taskOwnedBy(task, user);
+}
+
 function isScheduleOnlyChange(previousTask, nextTask, user) {
   const role = normalizedRole(user?.role);
   if (!["admin", "chofer"].includes(role) || previousTask.start || !nextTask.start) return false;
@@ -90,6 +95,14 @@ function isScheduleOnlyChange(previousTask, nextTask, user) {
   const { date: _previousDate, start: _previousStart, status: _previousStatus, updatedAt: _previousUpdatedAt, ...previousContent } = previousTask;
   const { date: _nextDate, start: _nextStart, status: _nextStatus, updatedAt: _nextUpdatedAt, ...nextContent } = nextTask;
   return JSON.stringify(previousContent) === JSON.stringify(nextContent);
+}
+
+function isStatusOnlyChange(previousTask, nextTask, user) {
+  if (normalizedRole(user?.role) !== "chofer") return false;
+  if (Number(previousTask.driverId) !== Number(user.currentDriverId)) return false;
+  const { status: previousStatus, updatedAt: _previousUpdatedAt, ...previousContent } = previousTask;
+  const { status: nextStatus, updatedAt: _nextUpdatedAt, ...nextContent } = nextTask;
+  return previousStatus !== nextStatus && JSON.stringify(previousContent) === JSON.stringify(nextContent);
 }
 
 function defaultVehicleDocs() {
@@ -302,10 +315,11 @@ async function localApiFetch(path, options = {}) {
         nextTask.assignedByUserName = current.name || current.username;
         continue;
       }
-      const { status: _previousStatus, ...previousContent } = previousTask;
-      const { status: _nextStatus, ...nextContent } = nextTask;
+      const { status: previousStatus, updatedAt: _previousUpdatedAt, ...previousContent } = previousTask;
+      const { status: nextStatus, updatedAt: _nextUpdatedAt, ...nextContent } = nextTask;
+      if (previousStatus !== nextStatus && !isStatusOnlyChange(previousTask, nextTask, current)) return localResponse({ error: "Solo el chofer asignado puede iniciar o finalizar tareas." }, 403);
       if (JSON.stringify(previousContent) !== JSON.stringify(nextContent)) {
-        if (!isScheduleOnlyChange(previousTask, nextTask, current) && !taskOwnedBy(previousTask, current)) return localResponse({ error: "Solo puede editar la tarea el usuario que la asigno." }, 403);
+        if (!isScheduleOnlyChange(previousTask, nextTask, current) && !canEditTask(previousTask, current)) return localResponse({ error: "Solo puede editar la tarea el usuario que la asigno o un admin." }, 403);
         nextTask.assignedByUserId = previousTask.assignedByUserId;
         nextTask.assignedByUserName = previousTask.assignedByUserName;
       }
@@ -652,8 +666,8 @@ export default function Home() {
 
   async function editTask(nextTask) {
     const existing = db.tasks.find((task) => Number(task.id) === Number(nextTask.id));
-    if (!taskOwnedBy(existing, user)) {
-      notify("Solo puede editar la tarea el usuario que la asigno.", "error");
+    if (!canEditTask(existing, user)) {
+      notify("Solo puede editar la tarea el usuario que la asigno o un admin.", "error");
       throw new Error("No tiene permiso para editar esta tarea");
     }
     await persistTask({
@@ -1001,7 +1015,7 @@ function TaskList({ tasks, db, currentUser, onStatus, onEdit, onSchedule, canSch
               <div className="driverTaskActions">
                 <a className="iconBtn navigationBtn" href={taskGoogleMapsURL(task)} target="_blank" rel="noreferrer" aria-label="Abrir navegacion en Google Maps" title="Abrir navegacion en Google Maps"><MapPin size={19} /></a>
                 {!task.start && canSchedule ? <TaskSchedule task={task} onSchedule={onSchedule} /> : null}
-                {taskOwnedBy(task, currentUser) ? <button className="btn" type="button" onClick={() => onEdit(task)}><Edit3 size={15} /> Editar</button> : null}
+                {canEditTask(task, currentUser) ? <button className="btn" type="button" onClick={() => onEdit(task)}><Edit3 size={15} /> Editar</button> : null}
                 {canOperateThisTask && task.status !== "realizada" ? (
                   <>
                     {task.status !== "en-trabajo" ? <button className="btn" onClick={() => onStatus(task, "en-trabajo")}>Iniciar</button> : null}
@@ -1090,12 +1104,12 @@ function DailySchedule({ date, tasks, db, scheduleBlocks = [], canCreate, canCha
   );
 }
 
-function DailyTask({ task, canOperate, canChangeStatus, currentUser, onStatus, onDelete, onSave, outside = false }) {
+function DailyTask({ task, canOperate, canChangeStatus, currentUser, onStatus, onEdit, onDelete, onSave, outside = false }) {
   const [editing, setEditing] = useState(false);
   const [saving, setSaving] = useState(false);
   const [draft, setDraft] = useState(null);
   const stops = (task.stops || []).map((stop) => (typeof stop === "string" ? stop : stop.address)).filter(Boolean);
-  const canEdit = canOperate && taskOwnedBy(task, currentUser);
+  const canEdit = canOperate && canEditTask(task, currentUser);
   const canOperateThisTask = canChangeStatus && Number(task.driverId) === Number(currentUser?.currentDriverId);
 
   function beginEditing() {
@@ -1189,7 +1203,7 @@ function DailyTask({ task, canOperate, canChangeStatus, currentUser, onStatus, o
               <a className="btn primary" href={taskGoogleMapsURL(task)} target="_blank" rel="noreferrer">Abrir en Google Maps</a>
               <a className="btn" href={taskRouteURL(task)} target="_blank" rel="noreferrer">Abrir en OSM</a>
               {task.merchandisePdf?.data ? <a className="btn" href={task.merchandisePdf.data} download={task.merchandisePdf.name}>Abrir PDF</a> : null}
-              {canEdit ? <button className="btn" type="button" onClick={beginEditing}><Edit3 size={15} /> Editar</button> : null}
+              {canEdit ? <button className="btn" type="button" onClick={() => onEdit ? onEdit(task) : beginEditing()}><Edit3 size={15} /> Editar</button> : null}
               {canOperate ? <button className="iconBtn danger" type="button" onClick={() => onDelete(task)} aria-label="Eliminar tarea" title="Eliminar tarea"><Trash2 size={16} /></button> : null}
               {canOperateThisTask && task.status !== "realizada" && task.status !== "en-trabajo" ? <button className="btn" onClick={() => onStatus(task, "en-trabajo")}>Iniciar</button> : null}
               {canOperateThisTask && task.status !== "realizada" ? <button className="btn primary" onClick={() => onStatus(task, "realizada")}>Finalizar</button> : null}
@@ -1255,14 +1269,15 @@ function NewTaskForm({ db, prefill, initialTask = null, currentDriverId, canAssi
   }, [formResetKey]);
 
   useEffect(() => {
-    const addresses = [form.destination, ...form.stops.map((value) => value.trim()).filter(Boolean)].filter(Boolean);
+    const destinations = [form.destination, ...form.stops.map((value) => value.trim()).filter(Boolean)].filter(Boolean);
+    const addresses = form.origin ? [form.origin, ...destinations] : destinations;
     if (addresses.length < 2) {
-      setRouteInfo({ status: addresses.length ? "Google Maps calculara el recorrido desde tu ubicacion actual." : "Agrega un destino para abrir la navegacion.", distance: "", coordinates: [] });
+      setRouteInfo({ status: destinations.length ? "Google Maps calculara el recorrido desde tu ubicacion actual." : "Agrega un destino para abrir la navegacion.", distance: "", coordinates: [] });
       return undefined;
     }
     const timer = window.setTimeout(() => calculateRoute(addresses), 900);
     return () => window.clearTimeout(timer);
-  }, [form.destination, form.stops]);
+  }, [form.origin, form.destination, form.stops]);
 
   function update(name, value) {
     setForm((current) => ({ ...current, [name]: value }));
@@ -1352,7 +1367,7 @@ function NewTaskForm({ db, prefill, initialTask = null, currentDriverId, canAssi
     });
   }
 
-  const previewDestination = [form.destination, ...form.stops].filter(Boolean).join(" -> ") || "Sin destino";
+  const previewDestination = [form.origin, form.destination, ...form.stops].filter(Boolean).join(" -> ") || "Sin recorrido";
 
   return (
     <div className="formLayout">
@@ -1385,7 +1400,10 @@ function NewTaskForm({ db, prefill, initialTask = null, currentDriverId, canAssi
           )}
         </Accordion>
 
-        <Accordion title="2. A donde hay que ir (opcional)">
+        <Accordion title="2. Origen y destino (opcional)">
+          <label>Origen <small>(opcional)</small></label>
+          <AddressSuggest value={form.origin} onChange={(value) => update("origin", value)} placeholder="Lugar donde arranca la tarea" />
+          <QuickAddresses onPick={(value) => update("origin", value)} />
           <label>Destino <small>(opcional)</small></label>
           <AddressSuggest value={form.destination} onChange={(value) => update("destination", value)} placeholder="Direccion del destino" />
           <QuickAddresses onPick={(value) => update("destination", value)} />

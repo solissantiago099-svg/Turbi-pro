@@ -333,8 +333,8 @@ async function writeState(request, env) {
         return Response.json({ error: "Solo el chofer asignado puede iniciar o finalizar tareas." }, { status: 403 });
       }
       if (JSON.stringify(previousContent) !== JSON.stringify(nextContent)) {
-        if (!isScheduleOnlyChange(previousTask, nextTask, user) && (!previousTask.assignedByUserId || String(previousTask.assignedByUserId) !== String(user.id))) {
-          return Response.json({ error: "Solo puede editar la tarea el usuario que la asigno." }, { status: 403 });
+        if (!isScheduleOnlyChange(previousTask, nextTask, user) && !isAdmin(user) && (!previousTask.assignedByUserId || String(previousTask.assignedByUserId) !== String(user.id))) {
+          return Response.json({ error: "Solo puede editar la tarea el usuario que la asigno o un admin." }, { status: 403 });
         }
       }
       nextTask.assignedByUserId = previousTask.assignedByUserId;
