@@ -36,6 +36,37 @@ export const schema = {
       details: "TEXT",
     },
   },
+  appRecords: {
+    table: "app_records",
+    columns: {
+      type: "TEXT NOT NULL",
+      id: "TEXT NOT NULL",
+      value: "TEXT NOT NULL",
+      date: "TEXT",
+      start: "TEXT",
+      driverId: "INTEGER",
+      status: "TEXT",
+      updatedAt: "TEXT NOT NULL",
+    },
+  },
+  appSettings: {
+    table: "app_settings",
+    columns: {
+      key: "TEXT PRIMARY KEY",
+      value: "TEXT NOT NULL",
+      updatedAt: "TEXT NOT NULL",
+      updatedBy: "TEXT",
+    },
+  },
+  appMeta: {
+    table: "app_meta",
+    columns: {
+      key: "TEXT PRIMARY KEY",
+      revision: "INTEGER NOT NULL DEFAULT 0",
+      updatedAt: "TEXT NOT NULL",
+      updatedBy: "TEXT",
+    },
+  },
   appSessions: {
     table: "app_sessions",
     columns: {

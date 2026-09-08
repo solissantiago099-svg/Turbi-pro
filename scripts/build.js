@@ -128,6 +128,30 @@ function validRole(role) {
   return ["admin", "usuario", "chofer"].includes(role);
 }
 
+function timeToMinutes(value) {
+  const [hours = "0", minutes = "0"] = String(value || "00:00").split(":");
+  return Number(hours) * 60 + Number(minutes);
+}
+
+function rangesOverlap(startA, endA, startB, endB) {
+  return startA < endB && startB < endA;
+}
+
+function scheduleBlocksForDate(blocks, date) {
+  return (blocks || []).filter((block) => block.date === date && block.start && block.end);
+}
+
+function findScheduleBlock(task, blocks) {
+  if (!task?.date || !task?.start) return null;
+  const start = timeToMinutes(task.start);
+  const end = start + Math.max(1, Number(task.assigned || task.duration || 1));
+  return scheduleBlocksForDate(blocks, task.date).find((block) => rangesOverlap(start, end, timeToMinutes(block.start), timeToMinutes(block.end))) || null;
+}
+
+function canEditTaskRecord(task, user) {
+  return isAdmin(user) || Boolean(task?.assignedByUserId && user?.id && String(task.assignedByUserId) === String(user.id));
+}
+
 function bootstrapUsers(env) {
   if (!env.TAMIZ_BOOTSTRAP_USERNAME || !env.TAMIZ_BOOTSTRAP_PASSWORD_HASH) return [];
   const role = normalizedRole(env.TAMIZ_BOOTSTRAP_ROLE || "admin");
@@ -150,10 +174,15 @@ async function ensureDatabase(env) {
     env.DB.prepare("CREATE INDEX IF NOT EXISTS idx_app_state_updated_at ON app_state(updated_at)"),
     env.DB.prepare("CREATE TABLE IF NOT EXISTS app_users (id TEXT PRIMARY KEY, username TEXT UNIQUE, password_hash TEXT, email TEXT, name TEXT, role TEXT NOT NULL DEFAULT 'chofer', current_driver_id INTEGER, last_seen_at TEXT NOT NULL, created_at TEXT NOT NULL)"),
     env.DB.prepare("CREATE TABLE IF NOT EXISTS app_sessions (token TEXT PRIMARY KEY, user_id TEXT NOT NULL, created_at TEXT NOT NULL, expires_at TEXT NOT NULL)"),
+    env.DB.prepare("CREATE TABLE IF NOT EXISTS app_records (type TEXT NOT NULL, id TEXT NOT NULL, value TEXT NOT NULL, date TEXT, start TEXT, driver_id INTEGER, status TEXT, updated_at TEXT NOT NULL, PRIMARY KEY(type, id))"),
+    env.DB.prepare("CREATE TABLE IF NOT EXISTS app_settings (key TEXT PRIMARY KEY, value TEXT NOT NULL, updated_at TEXT NOT NULL, updated_by TEXT)"),
+    env.DB.prepare("CREATE TABLE IF NOT EXISTS app_meta (key TEXT PRIMARY KEY, revision INTEGER NOT NULL DEFAULT 0, updated_at TEXT NOT NULL, updated_by TEXT)"),
     env.DB.prepare("CREATE TABLE IF NOT EXISTS app_audit (id INTEGER PRIMARY KEY AUTOINCREMENT, user_id TEXT, user_email TEXT, action TEXT NOT NULL, entity TEXT NOT NULL, entity_id TEXT, created_at TEXT NOT NULL, details TEXT)"),
     env.DB.prepare("CREATE INDEX IF NOT EXISTS idx_app_users_role ON app_users(role)"),
     env.DB.prepare("CREATE INDEX IF NOT EXISTS idx_app_sessions_user_id ON app_sessions(user_id)"),
     env.DB.prepare("CREATE INDEX IF NOT EXISTS idx_app_sessions_expires_at ON app_sessions(expires_at)"),
+    env.DB.prepare("CREATE INDEX IF NOT EXISTS idx_app_records_type_date ON app_records(type, date, start)"),
+    env.DB.prepare("CREATE INDEX IF NOT EXISTS idx_app_records_type_driver ON app_records(type, driver_id, status)"),
     env.DB.prepare("CREATE INDEX IF NOT EXISTS idx_app_audit_created_at ON app_audit(created_at)"),
     env.DB.prepare("CREATE INDEX IF NOT EXISTS idx_app_audit_entity ON app_audit(entity, entity_id)"),
   ]);
@@ -189,17 +218,16 @@ async function sha256(value) {
 async function currentUser(request, env) {
   await ensureDatabase(env);
   const now = new Date().toISOString();
-  await env.DB.prepare("DELETE FROM app_sessions WHERE expires_at < ?").bind(now).run();
   const token = bearer(request);
   if (!token) return null;
   const user = await env.DB.prepare("SELECT u.id, u.username, u.email, u.name, u.role, u.current_driver_id AS currentDriverId FROM app_sessions s JOIN app_users u ON u.id = s.user_id WHERE s.token = ? AND s.expires_at > ?").bind(token, now).first();
-  if (!user) return null;
-  await env.DB.prepare("UPDATE app_users SET last_seen_at = ? WHERE id = ?").bind(now, user.id).run();
-  return user;
+  return user || null;
 }
 
 async function login(request, env) {
   await ensureDatabase(env);
+  const cleanupBefore = new Date(Date.now() - 24 * 60 * 60 * 1000).toISOString();
+  await env.DB.prepare("DELETE FROM app_sessions WHERE expires_at < ?").bind(cleanupBefore).run();
   const payload = await request.json().catch(() => ({}));
   const username = String(payload.username || "").trim().toLowerCase();
   const password = String(payload.password || "");
@@ -225,9 +253,13 @@ async function logout(request, env) {
 }
 
 async function audit(env, user, action, entity, entityId, details = null) {
-  await env.DB.prepare("INSERT INTO app_audit (user_id, user_email, action, entity, entity_id, created_at, details) VALUES (?, ?, ?, ?, ?, ?, ?)")
-    .bind(user.id, user.email, action, entity, entityId, new Date().toISOString(), details ? JSON.stringify(details) : null)
-    .run();
+  try {
+    await env.DB.prepare("INSERT INTO app_audit (user_id, user_email, action, entity, entity_id, created_at, details) VALUES (?, ?, ?, ?, ?, ?, ?)")
+      .bind(user.id, user.email, action, entity, entityId, new Date().toISOString(), details ? JSON.stringify(details) : null)
+      .run();
+  } catch (error) {
+    console.warn("Audit skipped", error?.message || error);
+  }
 }
 
 async function session(request, env) {
@@ -294,29 +326,138 @@ async function updateMe(request, env) {
   return session(request, env);
 }
 
+function recordMeta(type, record) {
+  if (type !== "task") return { date: null, start: null, driverId: null, status: null };
+  return {
+    date: record.date || null,
+    start: record.start || null,
+    driverId: record.driverId ? Number(record.driverId) : null,
+    status: record.status || null,
+  };
+}
+
+async function storeRecord(env, type, record) {
+  const id = String(record.id || crypto.randomUUID());
+  const now = new Date().toISOString();
+  const nextRecord = { ...record, id: record.id || id, updatedAt: record.updatedAt || now };
+  const meta = recordMeta(type, nextRecord);
+  await env.DB.prepare("INSERT INTO app_records (type, id, value, date, start, driver_id, status, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?) ON CONFLICT(type, id) DO UPDATE SET value = excluded.value, date = excluded.date, start = excluded.start, driver_id = excluded.driver_id, status = excluded.status, updated_at = excluded.updated_at")
+    .bind(type, id, JSON.stringify(nextRecord), meta.date, meta.start, meta.driverId, meta.status, nextRecord.updatedAt)
+    .run();
+  return nextRecord;
+}
+
+async function readRecords(env, type) {
+  const rows = (await env.DB.prepare("SELECT value FROM app_records WHERE type = ? ORDER BY date ASC, start ASC, updated_at ASC").bind(type).all()).results || [];
+  return rows.map((row) => JSON.parse(row.value));
+}
+
+async function readRecord(env, type, id) {
+  const row = await env.DB.prepare("SELECT value FROM app_records WHERE type = ? AND id = ?").bind(type, String(id)).first();
+  return row ? JSON.parse(row.value) : null;
+}
+
+async function readSettings(env) {
+  const row = await env.DB.prepare("SELECT value FROM app_settings WHERE key = ?").bind("default").first();
+  return row ? JSON.parse(row.value) : {};
+}
+
+async function writeSettings(env, settings, user) {
+  const now = new Date().toISOString();
+  await env.DB.prepare("INSERT INTO app_settings (key, value, updated_at, updated_by) VALUES (?, ?, ?, ?) ON CONFLICT(key) DO UPDATE SET value = excluded.value, updated_at = excluded.updated_at, updated_by = excluded.updated_by")
+    .bind("default", JSON.stringify(settings || {}), now, user?.id || null)
+    .run();
+}
+
+async function revisionInfo(env) {
+  const row = await env.DB.prepare("SELECT revision, updated_at AS updatedAt, updated_by AS updatedBy FROM app_meta WHERE key = ?").bind("state").first();
+  return row || { revision: 0, updatedAt: null, updatedBy: null };
+}
+
+async function bumpRevision(env, user) {
+  const now = new Date().toISOString();
+  await env.DB.prepare("INSERT INTO app_meta (key, revision, updated_at, updated_by) VALUES (?, ?, ?, ?) ON CONFLICT(key) DO UPDATE SET revision = app_meta.revision + 1, updated_at = excluded.updated_at, updated_by = excluded.updated_by")
+    .bind("state", 1, now, user?.id || null)
+    .run();
+  return revisionInfo(env);
+}
+
+async function stateData(env) {
+  const tasks = await readRecords(env, "task");
+  const vehicles = await readRecords(env, "vehicle");
+  const drivers = await readRecords(env, "driver");
+  const settings = await readSettings(env);
+  if (!tasks.length && !vehicles.length && !drivers.length && !Object.keys(settings || {}).length) return null;
+  return { tasks, vehicles, drivers, settings: { currentDriverId: 1, scheduleBlocks: [], ...(settings || {}) } };
+}
+
+async function runStatementChunks(env, statements, size = 25) {
+  for (let index = 0; index < statements.length; index += size) {
+    await env.DB.batch(statements.slice(index, index + size));
+  }
+}
+
+async function migrateLegacyState(env) {
+  const migrated = await env.DB.prepare("SELECT revision FROM app_meta WHERE key = ?").bind("legacy_migrated").first();
+  if (migrated) return;
+  const countRow = await env.DB.prepare("SELECT COUNT(*) AS total FROM app_records").first();
+  const legacyRow = await env.DB.prepare("SELECT value, revision FROM app_state WHERE key = ?").bind("default").first();
+  if (Number(countRow?.total || 0) === 0 && legacyRow?.value) {
+    const legacy = JSON.parse(legacyRow.value);
+    const statements = [];
+    for (const task of legacy.tasks || []) statements.push(env.DB.prepare("INSERT OR REPLACE INTO app_records (type, id, value, date, start, driver_id, status, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?)").bind("task", String(task.id), JSON.stringify(task), task.date || null, task.start || null, task.driverId ? Number(task.driverId) : null, task.status || null, task.updatedAt || new Date().toISOString()));
+    for (const vehicle of legacy.vehicles || []) statements.push(env.DB.prepare("INSERT OR REPLACE INTO app_records (type, id, value, date, start, driver_id, status, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?)").bind("vehicle", String(vehicle.id), JSON.stringify(vehicle), null, null, null, vehicle.status || null, vehicle.updatedAt || new Date().toISOString()));
+    for (const driver of legacy.drivers || []) statements.push(env.DB.prepare("INSERT OR REPLACE INTO app_records (type, id, value, date, start, driver_id, status, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?)").bind("driver", String(driver.id), JSON.stringify(driver), null, null, null, driver.status || null, driver.updatedAt || new Date().toISOString()));
+    if (legacy.settings) statements.push(env.DB.prepare("INSERT OR REPLACE INTO app_settings (key, value, updated_at, updated_by) VALUES (?, ?, ?, ?)").bind("default", JSON.stringify(legacy.settings), new Date().toISOString(), null));
+    if (statements.length) await runStatementChunks(env, statements);
+  }
+  const now = new Date().toISOString();
+  await env.DB.batch([
+    env.DB.prepare("INSERT OR REPLACE INTO app_meta (key, revision, updated_at, updated_by) VALUES (?, ?, ?, ?)").bind("legacy_migrated", 1, now, null),
+    env.DB.prepare("INSERT INTO app_meta (key, revision, updated_at, updated_by) VALUES (?, ?, ?, ?) ON CONFLICT(key) DO NOTHING").bind("state", Number(legacyRow?.revision || 1), now, null),
+  ]);
+}
+
+async function stateResponse(env, user) {
+  await migrateLegacyState(env);
+  const data = await stateData(env);
+  const meta = await revisionInfo(env);
+  const users = isAdmin(user)
+    ? (await env.DB.prepare("SELECT id, username, email, name, role, current_driver_id AS currentDriverId, last_seen_at AS lastSeenAt FROM app_users ORDER BY created_at ASC, last_seen_at DESC").all()).results
+    : [];
+  return Response.json({ data, revision: meta.revision || 0, updatedAt: meta.updatedAt || null, updatedBy: meta.updatedBy || null, user, users }, { headers: { "cache-control": "no-store" } });
+}
+
+async function replaceStateTables(env, data, user) {
+  await env.DB.batch([
+    env.DB.prepare("DELETE FROM app_records"),
+    env.DB.prepare("DELETE FROM app_settings WHERE key = ?").bind("default"),
+  ]);
+  const statements = [];
+  for (const task of data.tasks || []) statements.push(env.DB.prepare("INSERT OR REPLACE INTO app_records (type, id, value, date, start, driver_id, status, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?)").bind("task", String(task.id), JSON.stringify(task), task.date || null, task.start || null, task.driverId ? Number(task.driverId) : null, task.status || null, task.updatedAt || new Date().toISOString()));
+  for (const vehicle of data.vehicles || []) statements.push(env.DB.prepare("INSERT OR REPLACE INTO app_records (type, id, value, date, start, driver_id, status, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?)").bind("vehicle", String(vehicle.id), JSON.stringify(vehicle), null, null, null, vehicle.status || null, vehicle.updatedAt || new Date().toISOString()));
+  for (const driver of data.drivers || []) statements.push(env.DB.prepare("INSERT OR REPLACE INTO app_records (type, id, value, date, start, driver_id, status, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?)").bind("driver", String(driver.id), JSON.stringify(driver), null, null, null, driver.status || null, driver.updatedAt || new Date().toISOString()));
+  statements.push(env.DB.prepare("INSERT OR REPLACE INTO app_settings (key, value, updated_at, updated_by) VALUES (?, ?, ?, ?)").bind("default", JSON.stringify(data.settings || {}), new Date().toISOString(), user.id));
+  if (statements.length) await runStatementChunks(env, statements);
+}
+
 async function readState(request, env) {
   const user = await currentUser(request, env);
   if (!user) return Response.json({ error: "Se requiere inicio de sesion" }, { status: 401 });
   await ensureDatabase(env);
-  const row = await env.DB.prepare("SELECT value, revision, updated_at AS updatedAt, updated_by AS updatedBy FROM app_state WHERE key = ?").bind("default").first();
-  return Response.json({ data: row ? JSON.parse(row.value) : null, revision: row?.revision || 0, updatedAt: row?.updatedAt || null, updatedBy: row?.updatedBy || null, user }, { headers: { "cache-control": "no-store" } });
+  return stateResponse(env, user);
 }
 
 async function writeState(request, env) {
   const user = await currentUser(request, env);
   if (!user) return Response.json({ error: "Se requiere inicio de sesion" }, { status: 401 });
   await ensureDatabase(env);
+  await migrateLegacyState(env);
   const payload = await request.json();
   if (!payload || typeof payload !== "object" || !payload.data || !Array.isArray(payload.data.tasks) || !Array.isArray(payload.data.vehicles) || !Array.isArray(payload.data.drivers)) {
     return Response.json({ error: "Estado invalido" }, { status: 400 });
   }
-  const row = await env.DB.prepare("SELECT value, revision FROM app_state WHERE key = ?").bind("default").first();
-  const currentRevision = row?.revision || 0;
-  if (row && Number(payload.revision || 0) !== currentRevision) {
-    const current = await env.DB.prepare("SELECT value, revision, updated_at AS updatedAt, updated_by AS updatedBy FROM app_state WHERE key = ?").bind("default").first();
-    return Response.json({ error: "version-conflict", data: JSON.parse(current.value), revision: current.revision, updatedAt: current.updatedAt, updatedBy: current.updatedBy }, { status: 409 });
-  }
-  const previousData = row?.value ? JSON.parse(row.value) : null;
+  const previousData = await stateData(env);
   const nextData = structuredClone(payload.data);
   if (previousData?.tasks) {
     const previousTasks = new Map(previousData.tasks.map(task => [String(task.id), task]));
@@ -346,13 +487,111 @@ async function writeState(request, env) {
       nextTask.assignedByUserName = user.name || user.username || user.email || "Usuario";
     }
   }
-  const nextRevision = currentRevision + 1;
-  const now = new Date().toISOString();
-  await env.DB.prepare("INSERT INTO app_state (key, value, revision, updated_at, updated_by) VALUES (?, ?, ?, ?, ?) ON CONFLICT(key) DO UPDATE SET value = excluded.value, revision = excluded.revision, updated_at = excluded.updated_at, updated_by = excluded.updated_by")
-    .bind("default", JSON.stringify(nextData), nextRevision, now, user.id)
-    .run();
-  await audit(env, user, payload.action || "save-state", "app_state", "default", { revision: nextRevision });
-  return Response.json({ ok: true, revision: nextRevision, updatedAt: now, updatedBy: user.id, user });
+  await replaceStateTables(env, nextData, user);
+  const meta = await bumpRevision(env, user);
+  await audit(env, user, payload.action || "save-state", "app_state", "default", { revision: meta.revision });
+  return stateResponse(env, user);
+}
+
+async function saveTask(request, env, mode) {
+  const user = await currentUser(request, env);
+  if (!user) return Response.json({ error: "Se requiere inicio de sesion" }, { status: 401 });
+  await migrateLegacyState(env);
+  const payload = await request.json();
+  const nextTask = { ...payload, updatedAt: new Date().toISOString() };
+  const existing = mode === "create" ? null : await readRecord(env, "task", nextTask.id);
+  if (mode !== "create" && !existing) return Response.json({ error: "Tarea inexistente" }, { status: 404 });
+  if (mode === "create") {
+    nextTask.id = nextTask.id || Date.now();
+    nextTask.assignedByUserId = user.id;
+    nextTask.assignedByUserName = user.name || user.username || user.email || "Usuario";
+  } else {
+    if (!canEditTaskRecord(existing, user)) return Response.json({ error: "Solo puede editar la tarea el usuario que la asigno o un admin." }, { status: 403 });
+    if (existing.status !== nextTask.status && !isStatusOnlyChange(existing, nextTask, user)) return Response.json({ error: "Solo el chofer asignado puede iniciar o finalizar tareas." }, { status: 403 });
+    nextTask.assignedByUserId = existing.assignedByUserId;
+    nextTask.assignedByUserName = existing.assignedByUserName;
+  }
+  const settings = await readSettings(env);
+  const blocked = findScheduleBlock(nextTask, settings.scheduleBlocks || []);
+  if (blocked) return Response.json({ error: "Ese horario esta bloqueado: " + (blocked.title || "Bloqueo operativo") + "." }, { status: 400 });
+  await storeRecord(env, "task", nextTask);
+  const meta = await bumpRevision(env, user);
+  await audit(env, user, mode === "create" ? "create-task" : "update-task", "task", String(nextTask.id), { revision: meta.revision });
+  return stateResponse(env, user);
+}
+
+async function updateTaskStatus(request, env) {
+  const user = await currentUser(request, env);
+  if (!user) return Response.json({ error: "Se requiere inicio de sesion" }, { status: 401 });
+  await migrateLegacyState(env);
+  const payload = await request.json();
+  const task = await readRecord(env, "task", payload.id);
+  if (!task) return Response.json({ error: "Tarea inexistente" }, { status: 404 });
+  const nextTask = { ...task, status: payload.status, updatedAt: new Date().toISOString() };
+  if (!isStatusOnlyChange(task, nextTask, user)) return Response.json({ error: "Solo el chofer asignado puede iniciar o finalizar tareas." }, { status: 403 });
+  await storeRecord(env, "task", nextTask);
+  const meta = await bumpRevision(env, user);
+  await audit(env, user, "update-task-status", "task", String(task.id), { status: payload.status, revision: meta.revision });
+  return stateResponse(env, user);
+}
+
+async function scheduleTaskRecord(request, env) {
+  const user = await currentUser(request, env);
+  if (!user) return Response.json({ error: "Se requiere inicio de sesion" }, { status: 401 });
+  await migrateLegacyState(env);
+  if (!["admin", "chofer"].includes(normalizedRole(user.role))) return Response.json({ error: "Solo el chofer o supervisor puede asignar horario." }, { status: 403 });
+  const payload = await request.json();
+  const task = await readRecord(env, "task", payload.id);
+  if (!task) return Response.json({ error: "Tarea inexistente" }, { status: 404 });
+  if (task.start) return Response.json({ error: "Esta tarea ya tiene un horario asignado." }, { status: 400 });
+  if (normalizedRole(user.role) === "chofer" && Number(task.driverId) !== Number(user.currentDriverId)) return Response.json({ error: "Esta tarea no esta asignada a este chofer." }, { status: 403 });
+  const nextTask = { ...task, date: payload.date || task.date, start: payload.start || "", updatedAt: new Date().toISOString() };
+  const settings = await readSettings(env);
+  const blocked = findScheduleBlock(nextTask, settings.scheduleBlocks || []);
+  if (blocked) return Response.json({ error: "Ese horario esta bloqueado: " + (blocked.title || "Bloqueo operativo") + "." }, { status: 400 });
+  await storeRecord(env, "task", nextTask);
+  const meta = await bumpRevision(env, user);
+  await audit(env, user, "schedule-task", "task", String(task.id), { revision: meta.revision });
+  return stateResponse(env, user);
+}
+
+async function deleteTaskRecord(request, env) {
+  const user = await currentUser(request, env);
+  if (!user) return Response.json({ error: "Se requiere inicio de sesion" }, { status: 401 });
+  await migrateLegacyState(env);
+  const payload = await request.json();
+  const task = await readRecord(env, "task", payload.id);
+  if (!task) return Response.json({ error: "Tarea inexistente" }, { status: 404 });
+  if (!canEditTaskRecord(task, user)) return Response.json({ error: "Solo puede eliminar la tarea el usuario que la asigno o un admin." }, { status: 403 });
+  await env.DB.prepare("DELETE FROM app_records WHERE type = ? AND id = ?").bind("task", String(payload.id)).run();
+  const meta = await bumpRevision(env, user);
+  await audit(env, user, "delete-task", "task", String(payload.id), { revision: meta.revision });
+  return stateResponse(env, user);
+}
+
+async function saveRecordEndpoint(request, env, type) {
+  const user = await currentUser(request, env);
+  if (!user) return Response.json({ error: "Se requiere inicio de sesion" }, { status: 401 });
+  if (!isAdmin(user)) return Response.json({ error: "No autorizado" }, { status: 403 });
+  await migrateLegacyState(env);
+  const payload = await request.json();
+  await storeRecord(env, type, { ...payload, updatedAt: new Date().toISOString() });
+  const meta = await bumpRevision(env, user);
+  await audit(env, user, "save-" + type, type, String(payload.id), { revision: meta.revision });
+  return stateResponse(env, user);
+}
+
+async function saveScheduleBlocks(request, env) {
+  const user = await currentUser(request, env);
+  if (!user) return Response.json({ error: "Se requiere inicio de sesion" }, { status: 401 });
+  if (!isAdmin(user)) return Response.json({ error: "No autorizado" }, { status: 403 });
+  await migrateLegacyState(env);
+  const payload = await request.json();
+  const settings = await readSettings(env);
+  await writeSettings(env, { ...settings, scheduleBlocks: Array.isArray(payload.blocks) ? payload.blocks : [] }, user);
+  const meta = await bumpRevision(env, user);
+  await audit(env, user, "save-schedule-blocks", "settings", "default", { revision: meta.revision });
+  return stateResponse(env, user);
 }
 
 export default {
@@ -368,6 +607,14 @@ export default {
     if (url.pathname === "/api/users" && request.method === "PUT") return updateUser(request, env);
     if (url.pathname === "/api/state" && request.method === "GET") return readState(request, env);
     if (url.pathname === "/api/state" && request.method === "PUT") return writeState(request, env);
+    if (url.pathname === "/api/tasks" && request.method === "POST") return saveTask(request, env, "create");
+    if (url.pathname === "/api/tasks" && request.method === "PUT") return saveTask(request, env, "edit");
+    if (url.pathname === "/api/tasks" && request.method === "DELETE") return deleteTaskRecord(request, env);
+    if (url.pathname === "/api/tasks/status" && request.method === "PUT") return updateTaskStatus(request, env);
+    if (url.pathname === "/api/tasks/schedule" && request.method === "PUT") return scheduleTaskRecord(request, env);
+    if (url.pathname === "/api/drivers" && ["POST", "PUT"].includes(request.method)) return saveRecordEndpoint(request, env, "driver");
+    if (url.pathname === "/api/vehicles" && ["POST", "PUT"].includes(request.method)) return saveRecordEndpoint(request, env, "vehicle");
+    if (url.pathname === "/api/schedule-blocks" && request.method === "PUT") return saveScheduleBlocks(request, env);
     return assetResponse(url.pathname) || new Response("404 - Archivo no encontrado", { status: 404, headers: { "content-type": "text/plain; charset=utf-8" } });
   },
 };

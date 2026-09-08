@@ -469,6 +469,25 @@ export default function Home() {
     notify(message);
   }
 
+  async function savePartial(path, method, body, fallbackDb, message = "Guardado") {
+    if (isLocalPreview()) {
+      await saveState(token, fallbackDb, revision, message);
+      return;
+    }
+    const response = await appFetch(path, {
+      method,
+      headers: apiHeaders(token, { "content-type": "application/json" }),
+      body: JSON.stringify(body),
+    });
+    const payload = await response.json().catch(() => ({}));
+    if (!response.ok) throw new Error(payload.error || "No se pudo guardar");
+    if (payload.data) setDb(payload.data);
+    if (payload.user) setUser((current) => ({ ...current, ...payload.user }));
+    if (Array.isArray(payload.users)) setUsers(payload.users);
+    setRevision(Number(payload.revision || revision + 1));
+    notify(message);
+  }
+
   useEffect(() => {
     const saved = localStorage.getItem("tamiz_session") || "";
     if (!saved) {
@@ -654,7 +673,7 @@ export default function Home() {
       ...db,
       tasks: mode === "edit" ? db.tasks.map((item) => (Number(item.id) === Number(nextTask.id) ? nextTask : item)) : [...db.tasks, nextTask],
     };
-    await saveState(token, nextDb, revision, mode === "edit" ? "Tarea actualizada" : "Tarea creada");
+    await savePartial("/api/tasks", mode === "edit" ? "PUT" : "POST", nextTask, nextDb, mode === "edit" ? "Tarea actualizada" : "Tarea creada");
     setSelectedDate(nextTask.date);
     setView("agenda");
     setEditingTask(null);
@@ -686,8 +705,9 @@ export default function Home() {
       notify("Solo el chofer asignado puede iniciar o finalizar esta tarea.", "error");
       return;
     }
-    const nextDb = { ...db, tasks: db.tasks.map((item) => (item.id === task.id ? { ...item, status, updatedAt: new Date().toISOString() } : item)) };
-    await saveState(token, nextDb, revision, "Estado actualizado");
+    const nextTask = { ...task, status, updatedAt: new Date().toISOString() };
+    const nextDb = { ...db, tasks: db.tasks.map((item) => (item.id === task.id ? nextTask : item)) };
+    await savePartial("/api/tasks/status", "PUT", { id: task.id, status }, nextDb, "Estado actualizado");
   }
   async function scheduleTask(task, date, start) {
     if (task.start) throw new Error("Esta tarea ya tiene un horario asignado.");
@@ -700,7 +720,7 @@ export default function Home() {
       return false;
     }
     const nextDb = { ...db, tasks: db.tasks.map((item) => Number(item.id) === Number(task.id) ? scheduledTask : item) };
-    await saveState(token, nextDb, revision, "Horario asignado");
+    await savePartial("/api/tasks/schedule", "PUT", { id: task.id, date: scheduledTask.date, start: scheduledTask.start }, nextDb, "Horario asignado");
     setRouteDate(scheduledTask.date);
     return true;
   }
@@ -709,7 +729,7 @@ export default function Home() {
     const label = task.title || task.description || "esta tarea";
     if (!window.confirm(`¿Eliminar ${label}? Esta accion no se puede deshacer.`)) return;
     const nextDb = { ...db, tasks: db.tasks.filter((item) => Number(item.id) !== Number(task.id)) };
-    await saveState(token, nextDb, revision, "Tarea eliminada");
+    await savePartial("/api/tasks", "DELETE", { id: task.id }, nextDb, "Tarea eliminada");
   }
 
   async function saveDriver(nextDriver, account = null) {
@@ -718,7 +738,7 @@ export default function Home() {
       ...db,
       drivers: exists ? db.drivers.map((driver) => (Number(driver.id) === Number(nextDriver.id) ? nextDriver : driver)) : [...db.drivers, nextDriver],
     };
-    await saveState(token, nextDb, revision, exists ? "Chofer actualizado" : "Chofer creado");
+    await savePartial("/api/drivers", exists ? "PUT" : "POST", nextDriver, nextDb, exists ? "Chofer actualizado" : "Chofer creado");
     if (account?.username) {
       const response = await appFetch("/api/users", {
         method: account.userId ? "PUT" : "POST",
@@ -749,7 +769,7 @@ export default function Home() {
       ...db,
       vehicles: exists ? db.vehicles.map((vehicle) => (Number(vehicle.id) === Number(nextVehicle.id) ? nextVehicle : vehicle)) : [...db.vehicles, nextVehicle],
     };
-    await saveState(token, nextDb, revision, exists ? "Camioneta actualizada" : "Camioneta creada");
+    await savePartial("/api/vehicles", exists ? "PUT" : "POST", nextVehicle, nextDb, exists ? "Camioneta actualizada" : "Camioneta creada");
   }
 
   async function saveScheduleBlocks(nextBlocks) {
@@ -760,7 +780,7 @@ export default function Home() {
         scheduleBlocks: nextBlocks,
       },
     };
-    await saveState(token, nextDb, revision, "Bloqueos actualizados");
+    await savePartial("/api/schedule-blocks", "PUT", { blocks: nextBlocks }, nextDb, "Bloqueos actualizados");
   }
 
   if (loading) return <div className="loading">Cargando TAMIZ RUTAS...</div>;
