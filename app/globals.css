@@ -839,6 +839,12 @@ textarea {
   min-width: 0;
 }
 
+.driverTaskTitleWrap {
+  display: grid;
+  gap: 3px;
+  min-width: 0;
+}
+
 .driverTaskTitle {
   overflow: hidden;
   color: var(--ink);
@@ -847,6 +853,14 @@ textarea {
   font-weight: 700;
   text-overflow: ellipsis;
   white-space: nowrap;
+}
+
+.taskAssigner {
+  color: var(--muted);
+  font-size: 12px;
+  font-weight: 600;
+  line-height: 1.25;
+  opacity: 0.78;
 }
 
 .driverTaskHeaderMeta {

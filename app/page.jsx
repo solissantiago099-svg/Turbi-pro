@@ -202,6 +202,10 @@ function addressLabel(address) {
   return addressAliases[String(address || "").trim().toLowerCase()] || address;
 }
 
+function taskAssigner(task) {
+  return task?.assignedByUserName || task?.assignedBy || "";
+}
+
 function encodeMap(value) {
   return encodeURIComponent(value || "");
 }
@@ -985,13 +989,19 @@ function TaskList({ tasks, db, currentUser, onStatus, onEdit, onSchedule, canSch
 
         const stops = (task.stops || []).map((stop) => (typeof stop === "string" ? stop : stop.address)).filter(Boolean);
         const destinations = [task.destination, ...stops].filter(Boolean);
+        const description = String(task.description || task.observations || "").trim();
+        const title = task.title || task.description || "Tarea sin titulo";
+        const assigner = taskAssigner(task);
         const canOperateThisTask = canChangeStatus && Number(task.driverId) === Number(currentUser?.currentDriverId);
         return (
           <details className={`driverTaskCard ${task.status === "realizada" ? "completed" : ""}`} key={task.id}>
             <summary className="driverTaskHeader">
               <span className="driverTaskHeading">
                 <span className="driverTaskTime">{task.start ? formatTime24(task.start) : "Sin horario"}</span>
-                <strong className="driverTaskTitle">{task.title || task.description || "Tarea sin titulo"}</strong>
+                <span className="driverTaskTitleWrap">
+                  <strong className="driverTaskTitle">{title}</strong>
+                  {assigner ? <small className="taskAssigner">Asignada por {assigner}</small> : null}
+                </span>
               </span>
               <span className="driverTaskHeaderMeta">
                 <span className={`status ${task.status}`}>{statusText[task.status] || task.status}</span>
@@ -1002,9 +1012,9 @@ function TaskList({ tasks, db, currentUser, onStatus, onEdit, onSchedule, canSch
 
               <section className="driverTaskBlock">
                 <span className="eyebrow">TAREA</span>
-                <h4>{task.title || task.description || "Tarea sin titulo"}</h4>
-                <p>{task.description || task.observations || "Sin descripcion cargada."}</p>
+                {description && description !== title ? <p>{description}</p> : null}
                 <p><b>Observaciones:</b> {task.observations || "Sin observaciones"}</p>
+                {assigner ? <p className="taskAssigner">Asignada por {assigner}</p> : null}
               </section>
               <section className="driverTaskBlock highlight">
                 <span className="eyebrow">DESTINOS</span>
@@ -1109,6 +1119,7 @@ function DailyTask({ task, canOperate, canChangeStatus, currentUser, onStatus, o
   const [saving, setSaving] = useState(false);
   const [draft, setDraft] = useState(null);
   const stops = (task.stops || []).map((stop) => (typeof stop === "string" ? stop : stop.address)).filter(Boolean);
+  const assigner = taskAssigner(task);
   const canEdit = canOperate && canEditTask(task, currentUser);
   const canOperateThisTask = canChangeStatus && Number(task.driverId) === Number(currentUser?.currentDriverId);
 
@@ -1160,6 +1171,7 @@ function DailyTask({ task, canOperate, canChangeStatus, currentUser, onStatus, o
         <span className="dailyTaskMain">
           <b>{task.title || task.description || "Tarea sin titulo"}</b>
           <small>{task.origin || "Sin origen"} -&gt; {task.destination || "Sin destino final"}</small>
+          {assigner ? <small className="taskAssigner">Asignada por {assigner}</small> : null}
         </span>
         <span className={`status ${task.status}`}>{statusText[task.status] || task.status}</span>
       </summary>
