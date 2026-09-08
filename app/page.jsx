@@ -1578,18 +1578,6 @@ function VehicleForm({ vehicle, onCancel, onSave }) {
         <div><label>Nombre interno</label><input value={form.name} onChange={(event) => update("name", event.target.value)} required /></div>
         <div><label>Patente</label><input value={form.plate} onChange={(event) => update("plate", event.target.value.toUpperCase())} required /></div>
       </div>
-      <div className="row">
-        <div><label>Marca</label><input value={form.brand} onChange={(event) => update("brand", event.target.value)} /></div>
-        <div><label>Modelo</label><input value={form.model} onChange={(event) => update("model", event.target.value)} /></div>
-      </div>
-      <div className="row">
-        <div><label>Kilometraje</label><input type="number" min="0" value={form.km} onChange={(event) => update("km", event.target.value)} /></div>
-        <div><label>Combustible</label><input value={form.fuel} onChange={(event) => update("fuel", event.target.value)} /></div>
-      </div>
-      <div className="row">
-        <div><label>Salud (%)</label><input type="number" min="0" max="100" value={form.health} onChange={(event) => update("health", event.target.value)} /></div>
-        <div><label>Estado</label><select value={form.status} onChange={(event) => update("status", event.target.value)}><option value="disponible">Disponible</option><option value="en-taller">En taller</option><option value="fuera-de-servicio">Fuera de servicio</option></select></div>
-      </div>
       <h3 className="sectionTitle">Documentacion legal</h3>
       <div className="vehicleDocs">
         {form.docs.map((doc, index) => (
