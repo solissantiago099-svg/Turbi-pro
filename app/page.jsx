@@ -90,8 +90,8 @@ function canEditTask(task, user) {
 
 function isScheduleOnlyChange(previousTask, nextTask, user) {
   const role = normalizedRole(user?.role);
-  if (!["admin", "chofer"].includes(role) || previousTask.start || !nextTask.start) return false;
-  if (role === "chofer" && Number(previousTask.driverId) !== Number(user.currentDriverId)) return false;
+  if (!["admin", "usuario", "chofer"].includes(role) || previousTask.start || !nextTask.start) return false;
+  if (role === "chofer" && Number(previousTask.driverId || user.currentDriverId) !== Number(user.currentDriverId)) return false;
   const { date: _previousDate, start: _previousStart, status: _previousStatus, updatedAt: _previousUpdatedAt, ...previousContent } = previousTask;
   const { date: _nextDate, start: _nextStart, status: _nextStatus, updatedAt: _nextUpdatedAt, ...nextContent } = nextTask;
   return JSON.stringify(previousContent) === JSON.stringify(nextContent);
@@ -99,7 +99,7 @@ function isScheduleOnlyChange(previousTask, nextTask, user) {
 
 function isStatusOnlyChange(previousTask, nextTask, user) {
   if (normalizedRole(user?.role) !== "chofer") return false;
-  if (Number(previousTask.driverId) !== Number(user.currentDriverId)) return false;
+  if (Number(previousTask.driverId || user.currentDriverId) !== Number(user.currentDriverId)) return false;
   const { status: previousStatus, updatedAt: _previousUpdatedAt, ...previousContent } = previousTask;
   const { status: nextStatus, updatedAt: _nextUpdatedAt, ...nextContent } = nextTask;
   return previousStatus !== nextStatus && JSON.stringify(previousContent) === JSON.stringify(nextContent);
@@ -202,6 +202,17 @@ function addressLabel(address) {
   return addressAliases[String(address || "").trim().toLowerCase()] || address;
 }
 
+function shortAddress(address) {
+  const labeled = addressLabel(address);
+  const parts = String(labeled || "")
+    .split(",")
+    .map((part) => part.trim())
+    .filter(Boolean);
+  if (!parts.length) return "";
+  const usefulParts = parts.filter((part) => !/argentina|ciudad autonoma|provincia|comuna|buenos aires/i.test(part));
+  return (usefulParts.length ? usefulParts : parts).slice(0, 2).join(", ");
+}
+
 function taskAssigner(task) {
   return task?.assignedByUserName || task?.assignedBy || "";
 }
@@ -272,6 +283,9 @@ async function localApiFetch(path, options = {}) {
     upstream.searchParams.set("limit", requestUrl.searchParams.get("limit") || "1");
     upstream.searchParams.set("countrycodes", "ar");
     upstream.searchParams.set("accept-language", "es");
+    upstream.searchParams.set("viewbox", "-59.3,-34.15,-57.7,-35.25");
+    upstream.searchParams.set("bounded", "0");
+    upstream.searchParams.set("addressdetails", "0");
     upstream.searchParams.set("q", requestUrl.searchParams.get("q") || "");
     return fetch(upstream.toString(), { headers: { accept: "application/json" } });
   }
@@ -701,7 +715,7 @@ export default function Home() {
   }
 
   async function updateTask(task, status) {
-    if (currentRole !== "chofer" || Number(task.driverId) !== Number(user.currentDriverId)) {
+    if (currentRole !== "chofer" || Number(task.driverId || user.currentDriverId) !== Number(user.currentDriverId)) {
       notify("Solo el chofer asignado puede iniciar o finalizar esta tarea.", "error");
       return;
     }
@@ -711,8 +725,8 @@ export default function Home() {
   }
   async function scheduleTask(task, date, start) {
     if (task.start) throw new Error("Esta tarea ya tiene un horario asignado.");
-    if (!["admin", "chofer"].includes(currentRole)) throw new Error("Solo el chofer o supervisor puede asignar horario.");
-    if (currentRole === "chofer" && Number(task.driverId) !== Number(user.currentDriverId)) throw new Error("Esta tarea no esta asignada a este chofer.");
+    if (!["admin", "usuario", "chofer"].includes(currentRole)) throw new Error("Solo el chofer o supervisor puede asignar horario.");
+    if (currentRole === "chofer" && Number(task.driverId || user.currentDriverId) !== Number(user.currentDriverId)) throw new Error("Esta tarea no esta asignada a este chofer.");
     const scheduledTask = { ...task, date: date || task.date || localISO(), start, updatedAt: new Date().toISOString() };
     const blocked = findScheduleBlock(scheduledTask, scheduleBlocks);
     if (blocked) {
@@ -922,7 +936,7 @@ export default function Home() {
                 }} />
               </RouteTaskGroup>
               <RouteTaskGroup title="Tareas sin horario" count={routeTasks.filter((task) => !task.start && task.status !== "realizada").length} defaultOpen>
-                <TaskList tasks={routeTasks.filter((task) => !task.start && task.status !== "realizada")} db={db} currentUser={user} onStatus={updateTask} onSchedule={scheduleTask} canSchedule={["admin", "chofer"].includes(currentRole)} canOperate canChangeStatus={canChangeTaskStatus} onEdit={(task) => {
+                <TaskList tasks={routeTasks.filter((task) => !task.start && task.status !== "realizada")} db={db} currentUser={user} onStatus={updateTask} onSchedule={scheduleTask} canSchedule={["admin", "usuario", "chofer"].includes(currentRole)} canOperate canChangeStatus={canChangeTaskStatus} onEdit={(task) => {
                   setEditingTask(task);
                   setTaskPrefill({ date: task.date, time: task.start });
                   setView("nueva");
@@ -1015,9 +1029,11 @@ function TaskList({ tasks, db, currentUser, onStatus, onEdit, onSchedule, canSch
         const description = String(task.description || task.observations || "").trim();
         const title = task.title || task.description || "Tarea sin titulo";
         const assigner = taskAssigner(task);
-        const canOperateThisTask = canChangeStatus && Number(task.driverId) === Number(currentUser?.currentDriverId);
+        const canOperateThisTask = canChangeStatus && Number(task.driverId || currentUser?.currentDriverId) === Number(currentUser?.currentDriverId);
+        const startPlace = shortAddress(task.origin);
+        const endPlace = shortAddress(task.destination || stops.at(-1));
         return (
-          <details className={`driverTaskCard ${task.status === "realizada" ? "completed" : ""}`} key={task.id}>
+          <details className={`driverTaskCard ${task.status === "realizada" ? "completed" : ""} ${task.status === "en-trabajo" ? "active" : ""}`} key={task.id}>
             <summary className="driverTaskHeader">
               <span className="driverTaskHeading">
                 <span className="driverTaskTime">{task.start ? formatTime24(task.start) : "Sin horario"}</span>
@@ -1032,21 +1048,29 @@ function TaskList({ tasks, db, currentUser, onStatus, onEdit, onSchedule, canSch
               </span>
             </summary>
             <div className="driverTaskBody">
-
+              <section className="driverTaskBlock highlight">
+                <span className="eyebrow">INICIO</span>
+                <h3>{task.start ? formatTime24(task.start) : "Sin horario"}</h3>
+                {startPlace ? <p>{startPlace}</p> : null}
+              </section>
               <section className="driverTaskBlock">
                 <span className="eyebrow">TAREA</span>
+                <h3>{title}</h3>
                 {description && description !== title ? <p>{description}</p> : null}
-                <p><b>Observaciones:</b> {task.observations || "Sin observaciones"}</p>
+                {task.observations ? <p><b>Observaciones:</b> {task.observations}</p> : null}
+                {task.merchandise ? <p><b>Mercaderia:</b> {task.merchandise}</p> : null}
+                {task.quantities ? <p><b>Cantidades:</b> {task.quantities}</p> : null}
                 {assigner ? <p className="taskAssigner">Asignada por {assigner}</p> : null}
               </section>
-              <section className="driverTaskBlock highlight">
-                <span className="eyebrow">DESTINOS</span>
-                <h3>{destinations[0] || "Sin destino cargado"}</h3>
-                {destinations.length > 1 ? <p>Luego: {destinations.slice(1).join(" / ")}</p> : null}
-                <p>{task.distance ? `${task.distance} km entre destinos` : "Google Maps calculara el recorrido"}</p>
+              <section className="driverTaskBlock">
+                <span className="eyebrow">FINAL</span>
+                <h3>{endPlace || "Sin destino cargado"}</h3>
+                {stops.length ? <p>Paradas: {stops.map(shortAddress).join(" / ")}</p> : null}
+                {task.distance ? <p>{task.distance} km estimados</p> : null}
               </section>
               <div className="driverTaskActions">
                 <a className="iconBtn navigationBtn" href={taskGoogleMapsURL(task)} target="_blank" rel="noreferrer" aria-label="Abrir navegacion en Google Maps" title="Abrir navegacion en Google Maps"><MapPin size={19} /></a>
+                {task.merchandisePdf?.data ? <a className="btn" href={task.merchandisePdf.data} download={task.merchandisePdf.name}>Abrir PDF</a> : null}
                 {!task.start && canSchedule ? <TaskSchedule task={task} onSchedule={onSchedule} /> : null}
                 {canEditTask(task, currentUser) ? <button className="btn" type="button" onClick={() => onEdit(task)}><Edit3 size={15} /> Editar</button> : null}
                 {canOperateThisTask && task.status !== "realizada" ? (
@@ -1142,9 +1166,20 @@ function DailyTask({ task, canOperate, canChangeStatus, currentUser, onStatus, o
   const [saving, setSaving] = useState(false);
   const [draft, setDraft] = useState(null);
   const stops = (task.stops || []).map((stop) => (typeof stop === "string" ? stop : stop.address)).filter(Boolean);
+  const title = task.title || task.description || "Tarea sin titulo";
+  const description = String(task.description || "").trim();
   const assigner = taskAssigner(task);
   const canEdit = canOperate && canEditTask(task, currentUser);
-  const canOperateThisTask = canChangeStatus && Number(task.driverId) === Number(currentUser?.currentDriverId);
+  const canOperateThisTask = canChangeStatus && Number(task.driverId || currentUser?.currentDriverId) === Number(currentUser?.currentDriverId);
+  const summaryRoute = [task.origin, task.destination].map(shortAddress).filter(Boolean).join(" -> ");
+  const metaItems = [
+    task.distance ? ["Distancia", `${task.distance} km`] : null,
+    task.merchandise ? ["Mercaderia", task.merchandise] : null,
+    task.quantities ? ["Cantidades", task.quantities] : null,
+    (task.contact || task.phone) ? ["Contacto", [task.contact, task.phone].filter(Boolean).join(" - ")] : null,
+    assigner ? ["Asignada por", assigner] : null,
+    stops.length ? ["Paradas", stops.map(shortAddress).join(" / ")] : null,
+  ].filter(Boolean);
 
   function beginEditing() {
     setDraft({
@@ -1188,12 +1223,12 @@ function DailyTask({ task, canOperate, canChangeStatus, currentUser, onStatus, o
   }
 
   return (
-    <details className={`dailyTask ${outside ? "outside" : ""} ${task.status === "realizada" ? "completed" : ""}`}>
+    <details className={`dailyTask ${outside ? "outside" : ""} ${task.status === "realizada" ? "completed" : ""} ${task.status === "en-trabajo" ? "active" : ""}`}>
       <summary>
         <span className="dailyTaskTime">{task.start}</span>
         <span className="dailyTaskMain">
-          <b>{task.title || task.description || "Tarea sin titulo"}</b>
-          <small>{task.origin || "Sin origen"} -&gt; {task.destination || "Sin destino final"}</small>
+          <b>{title}</b>
+          {summaryRoute ? <small>{summaryRoute}</small> : null}
           {assigner ? <small className="taskAssigner">Asignada por {assigner}</small> : null}
         </span>
         <span className={`status ${task.status}`}>{statusText[task.status] || task.status}</span>
@@ -1204,8 +1239,13 @@ function DailyTask({ task, canOperate, canChangeStatus, currentUser, onStatus, o
             <b>Descripcion</b>
             <textarea value={draft.description} onChange={(event) => updateDraft("description", event.target.value)} />
           </label>
-        ) : <p>{task.description || "Sin descripcion"}</p>}
-        <div className="dailyMeta">
+        ) : (
+          <>
+            {description && description !== title ? <p>{description}</p> : null}
+            {task.observations ? <p><b>Observaciones:</b> {task.observations}</p> : null}
+          </>
+        )}
+        {editing || metaItems.length ? <div className="dailyMeta">
           {editing ? (
             <>
               <label><b>Distancia</b><input type="number" min="0" step="0.1" value={draft.distance} onChange={(event) => updateDraft("distance", event.target.value)} /></label>
@@ -1217,16 +1257,9 @@ function DailyTask({ task, canOperate, canChangeStatus, currentUser, onStatus, o
               <label><b>Paradas</b><textarea value={draft.stops} onChange={(event) => updateDraft("stops", event.target.value)} placeholder="Una parada por linea" /></label>
             </>
           ) : (
-            <>
-              <span><b>Distancia</b>{task.distance || 0} km</span>
-              <span><b>Mercaderia</b>{task.merchandise || "-"}</span>
-              <span><b>Cantidades</b>{task.quantities || "-"}</span>
-              <span><b>Contacto</b>{task.contact || "-"} {task.phone ? `- ${task.phone}` : ""}</span>
-              <span><b>Asignada por</b>{task.assignedBy || "-"}</span>
-              <span><b>Paradas</b>{stops.length ? stops.join(" / ") : "Sin paradas"}</span>
-            </>
+            metaItems.map(([label, value]) => <span key={label}><b>{label}</b>{value}</span>)
           )}
-        </div>
+        </div> : null}
         <div className="inlineActions">
           {editing ? (
             <>
@@ -1236,7 +1269,6 @@ function DailyTask({ task, canOperate, canChangeStatus, currentUser, onStatus, o
           ) : (
             <>
               <a className="btn primary" href={taskGoogleMapsURL(task)} target="_blank" rel="noreferrer">Abrir en Google Maps</a>
-              <a className="btn" href={taskRouteURL(task)} target="_blank" rel="noreferrer">Abrir en OSM</a>
               {task.merchandisePdf?.data ? <a className="btn" href={task.merchandisePdf.data} download={task.merchandisePdf.name}>Abrir PDF</a> : null}
               {canEdit ? <button className="btn" type="button" onClick={() => onEdit ? onEdit(task) : beginEditing()}><Edit3 size={15} /> Editar</button> : null}
               {canOperate ? <button className="iconBtn danger" type="button" onClick={() => onDelete(task)} aria-label="Eliminar tarea" title="Eliminar tarea"><Trash2 size={16} /></button> : null}
@@ -1519,7 +1551,7 @@ function AddressSuggest({ value, onChange, placeholder = "", required = false })
     const timer = window.setTimeout(async () => {
       setLoading(true);
       try {
-        const response = await appFetch(`/api/geocode?q=${encodeURIComponent(query)}&limit=6`, { signal: controller.signal });
+        const response = await appFetch(`/api/geocode?q=${encodeURIComponent(`${query}, Buenos Aires, Argentina`)}&limit=6`, { signal: controller.signal });
         if (!response.ok) throw new Error("No se pudieron buscar direcciones");
         const results = await response.json();
         const remoteMatches = results.map((result) => result.display_name || result.name).filter(Boolean);
@@ -1567,7 +1599,7 @@ function AddressSuggest({ value, onChange, placeholder = "", required = false })
           {suggestions.map((address) => (
             <button className="addressOption" type="button" key={address} onMouseDown={(event) => event.preventDefault()} onClick={() => pick(address)}>
               <MapPin size={16} />
-              <span>{addressLabel(address)}</span>
+              <span title={address}>{shortAddress(address)}</span>
             </button>
           ))}
         </div>

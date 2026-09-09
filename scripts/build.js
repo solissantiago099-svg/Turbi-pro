@@ -81,6 +81,9 @@ async function geocode(requestUrl) {
   upstream.searchParams.set("limit", String(limit));
   upstream.searchParams.set("countrycodes", "ar");
   upstream.searchParams.set("accept-language", "es");
+  upstream.searchParams.set("viewbox", "-59.3,-34.15,-57.7,-35.25");
+  upstream.searchParams.set("bounded", "0");
+  upstream.searchParams.set("addressdetails", "0");
   upstream.searchParams.set("q", query);
   const response = await fetch(upstream, { headers: { "user-agent": "TAMIZ-RUTAS/1.0 hosted" } });
   return new Response(response.body, { status: response.status, headers: { "content-type": "application/json; charset=utf-8", "cache-control": "no-store" } });
@@ -105,8 +108,8 @@ function normalizedRole(role) {
 }
 function isScheduleOnlyChange(previousTask, nextTask, user) {
   const role = normalizedRole(user?.role);
-  if (!["admin", "chofer"].includes(role) || previousTask.start || !nextTask.start) return false;
-  if (role === "chofer" && Number(previousTask.driverId) !== Number(user.currentDriverId)) return false;
+  if (!["admin", "usuario", "chofer"].includes(role) || previousTask.start || !nextTask.start) return false;
+  if (role === "chofer" && Number(previousTask.driverId || user.currentDriverId) !== Number(user.currentDriverId)) return false;
   const { date: previousDate, start: previousStart, status: previousStatus, updatedAt: previousUpdatedAt, ...previousContent } = previousTask;
   const { date: nextDate, start: nextStart, status: nextStatus, updatedAt: nextUpdatedAt, ...nextContent } = nextTask;
   return JSON.stringify(previousContent) === JSON.stringify(nextContent);
@@ -114,7 +117,7 @@ function isScheduleOnlyChange(previousTask, nextTask, user) {
 
 function isStatusOnlyChange(previousTask, nextTask, user) {
   if (normalizedRole(user?.role) !== "chofer") return false;
-  if (Number(previousTask.driverId) !== Number(user.currentDriverId)) return false;
+  if (Number(previousTask.driverId || user.currentDriverId) !== Number(user.currentDriverId)) return false;
   const { status: previousStatus, updatedAt: previousUpdatedAt, ...previousContent } = previousTask;
   const { status: nextStatus, updatedAt: nextUpdatedAt, ...nextContent } = nextTask;
   return previousStatus !== nextStatus && JSON.stringify(previousContent) === JSON.stringify(nextContent);
@@ -539,12 +542,12 @@ async function scheduleTaskRecord(request, env) {
   const user = await currentUser(request, env);
   if (!user) return Response.json({ error: "Se requiere inicio de sesion" }, { status: 401 });
   await migrateLegacyState(env);
-  if (!["admin", "chofer"].includes(normalizedRole(user.role))) return Response.json({ error: "Solo el chofer o supervisor puede asignar horario." }, { status: 403 });
+  if (!["admin", "usuario", "chofer"].includes(normalizedRole(user.role))) return Response.json({ error: "Solo el chofer o supervisor puede asignar horario." }, { status: 403 });
   const payload = await request.json();
   const task = await readRecord(env, "task", payload.id);
   if (!task) return Response.json({ error: "Tarea inexistente" }, { status: 404 });
   if (task.start) return Response.json({ error: "Esta tarea ya tiene un horario asignado." }, { status: 400 });
-  if (normalizedRole(user.role) === "chofer" && Number(task.driverId) !== Number(user.currentDriverId)) return Response.json({ error: "Esta tarea no esta asignada a este chofer." }, { status: 403 });
+  if (normalizedRole(user.role) === "chofer" && Number(task.driverId || user.currentDriverId) !== Number(user.currentDriverId)) return Response.json({ error: "Esta tarea no esta asignada a este chofer." }, { status: 403 });
   const nextTask = { ...task, date: payload.date || task.date, start: payload.start || "", updatedAt: new Date().toISOString() };
   const settings = await readSettings(env);
   const blocked = findScheduleBlock(nextTask, settings.scheduleBlocks || []);
