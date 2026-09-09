@@ -1811,6 +1811,13 @@ textarea {
     white-space: normal;
   }
 
+  .dailyTaskMain b {
+    overflow: visible;
+    text-overflow: clip;
+    white-space: normal;
+    line-height: 1.12;
+  }
+
   .dailyTask summary .status {
     grid-column: 2;
   }

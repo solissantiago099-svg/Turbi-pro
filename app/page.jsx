@@ -1593,6 +1593,7 @@ function NewTaskForm({ db, prefill, initialTask = null, currentDriverId, canAssi
                   blocks={scheduleBlocks}
                   date={form.date}
                   start={form.start}
+                  taskTitle={form.title}
                   onSave={onScheduleBlocks}
                   onNotify={onError}
                   compact
@@ -2093,7 +2094,7 @@ function SettingsPanel({ user, users, db, token, revision, onUsers, onUser, onNo
   );
 }
 
-function ScheduleBlocksPanel({ blocks, onSave, onNotify, compact = false, date = "", start = "" }) {
+function ScheduleBlocksPanel({ blocks, onSave, onNotify, compact = false, date = "", start = "", taskTitle = "" }) {
   const initialStart = start || "10:00";
   const [form, setForm] = useState({
     date: date || localISO(),
@@ -2133,6 +2134,7 @@ function ScheduleBlocksPanel({ blocks, onSave, onNotify, compact = false, date =
       onNotify(message, "error");
       return;
     }
+    const blockTitle = compact ? taskTitle.trim() : form.title.trim();
     setValidationError("");
     await onSave([
       ...(blocks || []),
@@ -2141,11 +2143,11 @@ function ScheduleBlocksPanel({ blocks, onSave, onNotify, compact = false, date =
         date: form.date,
         start: form.start,
         end: form.end,
-        title: form.title.trim() || "Bloqueo operativo",
+        title: blockTitle || "Bloqueo operativo",
         createdAt: new Date().toISOString(),
       },
     ]);
-    setForm((current) => ({ ...current, title: "" }));
+    if (!compact) setForm((current) => ({ ...current, title: "" }));
   }
 
   async function removeBlock(blockId) {
@@ -2167,10 +2169,12 @@ function ScheduleBlocksPanel({ blocks, onSave, onNotify, compact = false, date =
           <label>Hasta <small>(puede superar las 19 hs)</small></label>
           <input type="time" value={form.end} onChange={(event) => update("end", event.target.value)} required />
         </div>
-        <div>
-          <label>Motivo</label>
-          <input value={form.title} onChange={(event) => update("title", event.target.value)} placeholder="Evento, mantenimiento, carga interna..." />
-        </div>
+        {!compact ? (
+          <div>
+            <label>Motivo</label>
+            <input value={form.title} onChange={(event) => update("title", event.target.value)} placeholder="Evento, mantenimiento, carga interna..." />
+          </div>
+        ) : null}
         <button className="btn primary" type="button" onClick={submit}><Plus size={16} /> Bloquear</button>
       </div>
       {validationError ? <div className="routeNotice scheduleBlockError">{validationError}</div> : null}
