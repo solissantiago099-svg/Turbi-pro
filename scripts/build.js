@@ -54,6 +54,7 @@ assets["/"] = assets["/index.html"];
 
 const worker = `const ASSETS = ${JSON.stringify(assets)};
 const VAPID_PUBLIC_KEY = "BOgzmxTmjpL2edxhwwe1W0MYXq_NsI-4NiJm2uNYJdMNM9HZgFNIxP6yrGJSmtnfa-aVEmAlr6nn8Q-zbQEAm7g";
+const SESSION_DAYS = 30;
 
 function decode(base64) {
   const binary = atob(base64);
@@ -224,7 +225,15 @@ async function currentUser(request, env) {
   const now = new Date().toISOString();
   const token = bearer(request);
   if (!token) return null;
-  const user = await env.DB.prepare("SELECT u.id, u.username, u.email, u.name, u.role, u.current_driver_id AS currentDriverId FROM app_sessions s JOIN app_users u ON u.id = s.user_id WHERE s.token = ? AND s.expires_at > ?").bind(token, now).first();
+  const user = await env.DB.prepare("SELECT u.id, u.username, u.email, u.name, u.role, u.current_driver_id AS currentDriverId, s.expires_at AS sessionExpiresAt FROM app_sessions s JOIN app_users u ON u.id = s.user_id WHERE s.token = ? AND s.expires_at > ?").bind(token, now).first();
+  if (user) {
+    const renewAfter = Date.now() + 7 * 24 * 60 * 60 * 1000;
+    if (new Date(user.sessionExpiresAt).getTime() < renewAfter) {
+      const expires = new Date(Date.now() + SESSION_DAYS * 24 * 60 * 60 * 1000).toISOString();
+      env.DB.prepare("UPDATE app_sessions SET expires_at = ? WHERE token = ?").bind(expires, token).run().catch(() => null);
+    }
+    delete user.sessionExpiresAt;
+  }
   return user || null;
 }
 
@@ -242,7 +251,7 @@ async function login(request, env) {
   crypto.getRandomValues(tokenBytes);
   const token = [...tokenBytes].map(byte => byte.toString(16).padStart(2, "0")).join("");
   const now = new Date();
-  const expires = new Date(now.getTime() + 7 * 24 * 60 * 60 * 1000);
+  const expires = new Date(now.getTime() + SESSION_DAYS * 24 * 60 * 60 * 1000);
   await env.DB.prepare("INSERT INTO app_sessions (token, user_id, created_at, expires_at) VALUES (?, ?, ?, ?)").bind(token, user.id, now.toISOString(), expires.toISOString()).run();
   await audit(env, user, "login", "user", user.id);
   delete user.passwordHash;
@@ -436,8 +445,7 @@ async function savePushSubscription(request, env) {
 }
 
 function taskNotificationTargets(subscriptions, task) {
-  if (!task?.driverId) return [];
-  return subscriptions.filter((item) => normalizedRole(item.role) === "chofer" && Number(item.currentDriverId) === Number(task.driverId));
+  return subscriptions.filter((item) => item?.subscription?.endpoint);
 }
 
 async function sendPush(subscription, env) {
@@ -458,7 +466,7 @@ async function sendPush(subscription, env) {
 }
 
 async function notifyTaskAssignment(env, task, user) {
-  if (!env.TAMIZ_VAPID_PRIVATE_JWK || !task?.driverId) return;
+  if (!env.TAMIZ_VAPID_PRIVATE_JWK) return;
   const subscriptions = await readPushSubscriptions(env);
   const targets = taskNotificationTargets(subscriptions, task);
   if (!targets.length) return;
