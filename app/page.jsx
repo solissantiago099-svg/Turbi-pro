@@ -237,18 +237,22 @@ function taskAssigner(task) {
   return task?.assignedByUserName || task?.assignedBy || "";
 }
 
-function formatCreatedTime(value) {
+function formatCreatedDateTime(value) {
   if (!value) return "";
   const date = new Date(value);
   if (Number.isNaN(date.getTime())) return "";
-  return date.toLocaleTimeString("es-AR", { hour: "2-digit", minute: "2-digit" });
+  const time = date.toLocaleTimeString("es-AR", { hour: "2-digit", minute: "2-digit" });
+  const assignedDate = localISO(date);
+  if (assignedDate === localISO()) return `hoy ${time}`;
+  const day = date.toLocaleDateString("es-AR", { day: "2-digit", month: "2-digit" });
+  return `${day} ${time}`;
 }
 
 function taskAssignerLabel(task) {
   const assigner = taskAssigner(task);
   if (!assigner) return "";
-  const createdTime = formatCreatedTime(task.createdAt);
-  return createdTime ? `${assigner} - ${createdTime}` : assigner;
+  const createdDateTime = formatCreatedDateTime(task.createdAt);
+  return createdDateTime ? `${assigner} - ${createdDateTime}` : assigner;
 }
 
 function encodeMap(value) {
