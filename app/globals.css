@@ -615,6 +615,16 @@ textarea {
   background: #f5f8e8;
 }
 
+.dailyTask.active {
+  border-color: #d7b755;
+  border-left-color: #b78116;
+  background: #fff8e5;
+}
+
+.dailyTask.active summary {
+  background: linear-gradient(180deg, #fffaf0, #fff2cb);
+}
+
 .dailyTask.completed summary {
   background: linear-gradient(180deg, #f8faed, #eef4d8);
 }
@@ -805,6 +815,12 @@ textarea {
 .driverTaskCard.completed {
   border-color: #ccd7a0;
   background: #f5f8e8;
+}
+
+.driverTaskCard.active {
+  border-color: #d7b755;
+  background: #fff8e5;
+  box-shadow: 0 16px 32px rgba(123, 92, 18, 0.14);
 }
 
 .driverTaskCard.completed .driverTaskTime,
@@ -1009,6 +1025,10 @@ textarea {
 .status.realizada {
   background: #edf3dd;
   color: var(--green-dark);
+}
+
+.notificationButton {
+  background: #fffdf8;
 }
 
 .empty {
@@ -1486,6 +1506,37 @@ textarea {
   margin-bottom: 16px;
 }
 
+.scheduleModeControl {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin: 8px 0 12px;
+}
+
+.scheduleModeControl button {
+  min-height: 38px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  padding: 8px 12px;
+  background: #fffdf8;
+  color: var(--muted);
+  font-weight: 900;
+}
+
+.scheduleModeControl button.active {
+  border-color: var(--green);
+  background: #edf5df;
+  color: var(--green-dark);
+}
+
+.inlineBlockFields {
+  display: grid;
+  grid-template-columns: 180px minmax(0, 1fr);
+  gap: 12px;
+  align-items: end;
+  margin-top: 10px;
+}
+
 .scheduleBlockForm {
   display: grid;
   grid-template-columns: 160px 130px 130px minmax(180px, 1fr) auto;
@@ -1791,12 +1842,20 @@ textarea {
     white-space: normal;
   }
 
+  .dailyTaskMain b {
+    overflow: visible;
+    text-overflow: clip;
+    white-space: normal;
+    line-height: 1.12;
+  }
+
   .dailyTask summary .status {
     grid-column: 2;
   }
 
   .dailyMeta,
-  .formLayout {
+  .formLayout,
+  .inlineBlockFields {
     grid-template-columns: 1fr;
   }
 

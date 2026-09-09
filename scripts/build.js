@@ -53,6 +53,8 @@ const assets = Object.fromEntries(listFiles(out).map((absolute) => {
 assets["/"] = assets["/index.html"];
 
 const worker = `const ASSETS = ${JSON.stringify(assets)};
+const VAPID_PUBLIC_KEY = "BOgzmxTmjpL2edxhwwe1W0MYXq_NsI-4NiJm2uNYJdMNM9HZgFNIxP6yrGJSmtnfa-aVEmAlr6nn8Q-zbQEAm7g";
+const SESSION_DAYS = 30;
 
 function decode(base64) {
   const binary = atob(base64);
@@ -81,6 +83,9 @@ async function geocode(requestUrl) {
   upstream.searchParams.set("limit", String(limit));
   upstream.searchParams.set("countrycodes", "ar");
   upstream.searchParams.set("accept-language", "es");
+  upstream.searchParams.set("viewbox", "-59.3,-34.15,-57.7,-35.25");
+  upstream.searchParams.set("bounded", "0");
+  upstream.searchParams.set("addressdetails", "0");
   upstream.searchParams.set("q", query);
   const response = await fetch(upstream, { headers: { "user-agent": "TAMIZ-RUTAS/1.0 hosted" } });
   return new Response(response.body, { status: response.status, headers: { "content-type": "application/json; charset=utf-8", "cache-control": "no-store" } });
@@ -105,8 +110,8 @@ function normalizedRole(role) {
 }
 function isScheduleOnlyChange(previousTask, nextTask, user) {
   const role = normalizedRole(user?.role);
-  if (!["admin", "chofer"].includes(role) || previousTask.start || !nextTask.start) return false;
-  if (role === "chofer" && Number(previousTask.driverId) !== Number(user.currentDriverId)) return false;
+  if (!["admin", "usuario", "chofer"].includes(role) || previousTask.start || !nextTask.start) return false;
+  if (role === "chofer" && Number(previousTask.driverId || user.currentDriverId) !== Number(user.currentDriverId)) return false;
   const { date: previousDate, start: previousStart, status: previousStatus, updatedAt: previousUpdatedAt, ...previousContent } = previousTask;
   const { date: nextDate, start: nextStart, status: nextStatus, updatedAt: nextUpdatedAt, ...nextContent } = nextTask;
   return JSON.stringify(previousContent) === JSON.stringify(nextContent);
@@ -114,7 +119,7 @@ function isScheduleOnlyChange(previousTask, nextTask, user) {
 
 function isStatusOnlyChange(previousTask, nextTask, user) {
   if (normalizedRole(user?.role) !== "chofer") return false;
-  if (Number(previousTask.driverId) !== Number(user.currentDriverId)) return false;
+  if (Number(previousTask.driverId || user.currentDriverId) !== Number(user.currentDriverId)) return false;
   const { status: previousStatus, updatedAt: previousUpdatedAt, ...previousContent } = previousTask;
   const { status: nextStatus, updatedAt: nextUpdatedAt, ...nextContent } = nextTask;
   return previousStatus !== nextStatus && JSON.stringify(previousContent) === JSON.stringify(nextContent);
@@ -146,6 +151,10 @@ function findScheduleBlock(task, blocks) {
   const start = timeToMinutes(task.start);
   const end = start + Math.max(1, Number(task.assigned || task.duration || 1));
   return scheduleBlocksForDate(blocks, task.date).find((block) => rangesOverlap(start, end, timeToMinutes(block.start), timeToMinutes(block.end))) || null;
+}
+
+function scheduleBlockIdForTask(task) {
+  return task?.scheduleBlockId || (task?.id ? "task-" + task.id : "");
 }
 
 function canEditTaskRecord(task, user) {
@@ -220,7 +229,15 @@ async function currentUser(request, env) {
   const now = new Date().toISOString();
   const token = bearer(request);
   if (!token) return null;
-  const user = await env.DB.prepare("SELECT u.id, u.username, u.email, u.name, u.role, u.current_driver_id AS currentDriverId FROM app_sessions s JOIN app_users u ON u.id = s.user_id WHERE s.token = ? AND s.expires_at > ?").bind(token, now).first();
+  const user = await env.DB.prepare("SELECT u.id, u.username, u.email, u.name, u.role, u.current_driver_id AS currentDriverId, s.expires_at AS sessionExpiresAt FROM app_sessions s JOIN app_users u ON u.id = s.user_id WHERE s.token = ? AND s.expires_at > ?").bind(token, now).first();
+  if (user) {
+    const renewAfter = Date.now() + 7 * 24 * 60 * 60 * 1000;
+    if (new Date(user.sessionExpiresAt).getTime() < renewAfter) {
+      const expires = new Date(Date.now() + SESSION_DAYS * 24 * 60 * 60 * 1000).toISOString();
+      env.DB.prepare("UPDATE app_sessions SET expires_at = ? WHERE token = ?").bind(expires, token).run().catch(() => null);
+    }
+    delete user.sessionExpiresAt;
+  }
   return user || null;
 }
 
@@ -238,7 +255,7 @@ async function login(request, env) {
   crypto.getRandomValues(tokenBytes);
   const token = [...tokenBytes].map(byte => byte.toString(16).padStart(2, "0")).join("");
   const now = new Date();
-  const expires = new Date(now.getTime() + 7 * 24 * 60 * 60 * 1000);
+  const expires = new Date(now.getTime() + SESSION_DAYS * 24 * 60 * 60 * 1000);
   await env.DB.prepare("INSERT INTO app_sessions (token, user_id, created_at, expires_at) VALUES (?, ?, ?, ?)").bind(token, user.id, now.toISOString(), expires.toISOString()).run();
   await audit(env, user, "login", "user", user.id);
   delete user.passwordHash;
@@ -369,6 +386,101 @@ async function writeSettings(env, settings, user) {
     .run();
 }
 
+async function readSettingKey(env, key, fallback) {
+  const row = await env.DB.prepare("SELECT value FROM app_settings WHERE key = ?").bind(key).first();
+  return row ? JSON.parse(row.value) : fallback;
+}
+
+async function writeSettingKey(env, key, value, user) {
+  const now = new Date().toISOString();
+  await env.DB.prepare("INSERT INTO app_settings (key, value, updated_at, updated_by) VALUES (?, ?, ?, ?) ON CONFLICT(key) DO UPDATE SET value = excluded.value, updated_at = excluded.updated_at, updated_by = excluded.updated_by")
+    .bind(key, JSON.stringify(value), now, user?.id || null)
+    .run();
+}
+
+function base64UrlBytes(bytes) {
+  let binary = "";
+  const view = bytes instanceof Uint8Array ? bytes : new Uint8Array(bytes);
+  for (const byte of view) binary += String.fromCharCode(byte);
+  return btoa(binary).replace(/=/g, "").replace(/\\+/g, "-").replace(/\\//g, "_");
+}
+
+function base64UrlText(value) {
+  return base64UrlBytes(new TextEncoder().encode(value));
+}
+
+async function vapidToken(env, audience) {
+  if (!env.TAMIZ_VAPID_PRIVATE_JWK) return "";
+  const jwk = JSON.parse(env.TAMIZ_VAPID_PRIVATE_JWK);
+  const key = await crypto.subtle.importKey("jwk", jwk, { name: "ECDSA", namedCurve: "P-256" }, false, ["sign"]);
+  const header = base64UrlText(JSON.stringify({ typ: "JWT", alg: "ES256" }));
+  const payload = base64UrlText(JSON.stringify({ aud: audience, exp: Math.floor(Date.now() / 1000) + 43200, sub: "mailto:operaciones@tamiz.local" }));
+  const unsigned = header + "." + payload;
+  const signature = await crypto.subtle.sign({ name: "ECDSA", hash: "SHA-256" }, key, new TextEncoder().encode(unsigned));
+  return unsigned + "." + base64UrlBytes(signature);
+}
+
+async function readPushSubscriptions(env) {
+  return await readSettingKey(env, "push_subscriptions", []);
+}
+
+async function savePushSubscription(request, env) {
+  const user = await currentUser(request, env);
+  if (!user) return Response.json({ error: "Se requiere inicio de sesion" }, { status: 401 });
+  const payload = await request.json();
+  const subscription = payload?.subscription;
+  if (!subscription?.endpoint || !subscription?.keys?.p256dh || !subscription?.keys?.auth) {
+    return Response.json({ error: "Suscripcion invalida" }, { status: 400 });
+  }
+  const current = await readPushSubscriptions(env);
+  const next = current.filter((item) => item.subscription?.endpoint !== subscription.endpoint);
+  next.push({
+    id: crypto.randomUUID(),
+    userId: user.id,
+    username: user.username || "",
+    role: normalizedRole(user.role),
+    currentDriverId: user.currentDriverId || null,
+    subscription,
+    updatedAt: new Date().toISOString(),
+  });
+  await writeSettingKey(env, "push_subscriptions", next.slice(-250), user);
+  await audit(env, user, "subscribe-push", "user", user.id);
+  return Response.json({ ok: true }, { headers: { "cache-control": "no-store" } });
+}
+
+function taskNotificationTargets(subscriptions, task) {
+  return subscriptions.filter((item) => item?.subscription?.endpoint);
+}
+
+async function sendPush(subscription, env) {
+  const endpoint = subscription?.endpoint || "";
+  if (!endpoint) return { ok: false };
+  const audience = new URL(endpoint).origin;
+  const token = await vapidToken(env, audience);
+  if (!token) return { ok: false };
+  const response = await fetch(endpoint, {
+    method: "POST",
+    headers: {
+      TTL: "86400",
+      Urgency: "normal",
+      Authorization: "vapid t=" + token + ", k=" + VAPID_PUBLIC_KEY,
+    },
+  });
+  return { ok: response.ok, gone: response.status === 404 || response.status === 410 };
+}
+
+async function notifyTaskAssignment(env, task, user) {
+  if (!env.TAMIZ_VAPID_PRIVATE_JWK) return;
+  const subscriptions = await readPushSubscriptions(env);
+  const targets = taskNotificationTargets(subscriptions, task);
+  if (!targets.length) return;
+  const results = await Promise.allSettled(targets.map((item) => sendPush(item.subscription, env)));
+  const goneEndpoints = new Set(results.map((result, index) => result.status === "fulfilled" && result.value.gone ? targets[index].subscription.endpoint : null).filter(Boolean));
+  if (goneEndpoints.size) {
+    await writeSettingKey(env, "push_subscriptions", subscriptions.filter((item) => !goneEndpoints.has(item.subscription?.endpoint)), user);
+  }
+}
+
 async function revisionInfo(env) {
   const row = await env.DB.prepare("SELECT revision, updated_at AS updatedAt, updated_by AS updatedBy FROM app_meta WHERE key = ?").bind("state").first();
   return row || { revision: 0, updatedAt: null, updatedBy: null };
@@ -448,6 +560,10 @@ async function readState(request, env) {
   return stateResponse(env, user);
 }
 
+function pushPublicKey() {
+  return Response.json({ publicKey: VAPID_PUBLIC_KEY, supported: true }, { headers: { "cache-control": "no-store" } });
+}
+
 async function writeState(request, env) {
   const user = await currentUser(request, env);
   if (!user) return Response.json({ error: "Se requiere inicio de sesion" }, { status: 401 });
@@ -493,7 +609,7 @@ async function writeState(request, env) {
   return stateResponse(env, user);
 }
 
-async function saveTask(request, env, mode) {
+async function saveTask(request, env, mode, ctx) {
   const user = await currentUser(request, env);
   if (!user) return Response.json({ error: "Se requiere inicio de sesion" }, { status: 401 });
   await migrateLegacyState(env);
@@ -512,11 +628,43 @@ async function saveTask(request, env, mode) {
     nextTask.assignedByUserName = existing.assignedByUserName;
   }
   const settings = await readSettings(env);
-  const blocked = findScheduleBlock(nextTask, settings.scheduleBlocks || []);
+  const ownBlockId = scheduleBlockIdForTask(nextTask);
+  const scheduleBlocks = settings.scheduleBlocks || [];
+  const validationBlocks = ownBlockId ? scheduleBlocks.filter((block) => String(block.id) !== String(ownBlockId)) : scheduleBlocks;
+  const blocked = findScheduleBlock(nextTask, validationBlocks);
   if (blocked) return Response.json({ error: "Ese horario esta bloqueado: " + (blocked.title || "Bloqueo operativo") + "." }, { status: 400 });
+  let block = null;
+  if (nextTask.isScheduleBlock) {
+    const start = timeToMinutes(nextTask.start);
+    const fallbackEnd = start + Number(nextTask.duration || nextTask.assigned || 1);
+    const blockEnd = nextTask.blockEnd || String(Math.floor(fallbackEnd / 60)).padStart(2, "0") + ":" + String(fallbackEnd % 60).padStart(2, "0");
+    if (!nextTask.date || !nextTask.start || timeToMinutes(blockEnd) <= start) return Response.json({ error: "El horario de fin debe ser posterior al inicio." }, { status: 400 });
+    block = {
+      id: ownBlockId,
+      date: nextTask.date,
+      start: nextTask.start,
+      end: blockEnd,
+      title: nextTask.title || "Bloqueo operativo",
+      taskId: nextTask.id,
+      createdAt: nextTask.createdAt || new Date().toISOString(),
+    };
+  }
   await storeRecord(env, "task", nextTask);
+  if (block) {
+    const nextBlocks = [...scheduleBlocks.filter((item) => String(item.id) !== String(block.id)), block];
+    await writeSettings(env, { ...settings, scheduleBlocks: nextBlocks }, user);
+  } else if (existing?.scheduleBlockId) {
+    const nextBlocks = scheduleBlocks.filter((item) => String(item.id) !== String(existing.scheduleBlockId));
+    await writeSettings(env, { ...settings, scheduleBlocks: nextBlocks }, user);
+  }
   const meta = await bumpRevision(env, user);
   await audit(env, user, mode === "create" ? "create-task" : "update-task", "task", String(nextTask.id), { revision: meta.revision });
+  const shouldNotify = nextTask.driverId && (mode === "create" || Number(existing?.driverId || 0) !== Number(nextTask.driverId));
+  if (shouldNotify) {
+    const notification = notifyTaskAssignment(env, nextTask, user).catch(() => null);
+    if (ctx?.waitUntil) ctx.waitUntil(notification);
+    else await notification;
+  }
   return stateResponse(env, user);
 }
 
@@ -539,12 +687,12 @@ async function scheduleTaskRecord(request, env) {
   const user = await currentUser(request, env);
   if (!user) return Response.json({ error: "Se requiere inicio de sesion" }, { status: 401 });
   await migrateLegacyState(env);
-  if (!["admin", "chofer"].includes(normalizedRole(user.role))) return Response.json({ error: "Solo el chofer o supervisor puede asignar horario." }, { status: 403 });
+  if (!["admin", "usuario", "chofer"].includes(normalizedRole(user.role))) return Response.json({ error: "Solo el chofer o supervisor puede asignar horario." }, { status: 403 });
   const payload = await request.json();
   const task = await readRecord(env, "task", payload.id);
   if (!task) return Response.json({ error: "Tarea inexistente" }, { status: 404 });
   if (task.start) return Response.json({ error: "Esta tarea ya tiene un horario asignado." }, { status: 400 });
-  if (normalizedRole(user.role) === "chofer" && Number(task.driverId) !== Number(user.currentDriverId)) return Response.json({ error: "Esta tarea no esta asignada a este chofer." }, { status: 403 });
+  if (normalizedRole(user.role) === "chofer" && Number(task.driverId || user.currentDriverId) !== Number(user.currentDriverId)) return Response.json({ error: "Esta tarea no esta asignada a este chofer." }, { status: 403 });
   const nextTask = { ...task, date: payload.date || task.date, start: payload.start || "", updatedAt: new Date().toISOString() };
   const settings = await readSettings(env);
   const blocked = findScheduleBlock(nextTask, settings.scheduleBlocks || []);
@@ -564,6 +712,11 @@ async function deleteTaskRecord(request, env) {
   if (!task) return Response.json({ error: "Tarea inexistente" }, { status: 404 });
   if (!canEditTaskRecord(task, user)) return Response.json({ error: "Solo puede eliminar la tarea el usuario que la asigno o un admin." }, { status: 403 });
   await env.DB.prepare("DELETE FROM app_records WHERE type = ? AND id = ?").bind("task", String(payload.id)).run();
+  if (task.isScheduleBlock) {
+    const settings = await readSettings(env);
+    const blockId = scheduleBlockIdForTask(task);
+    await writeSettings(env, { ...settings, scheduleBlocks: (settings.scheduleBlocks || []).filter((block) => String(block.id) !== String(blockId)) }, user);
+  }
   const meta = await bumpRevision(env, user);
   await audit(env, user, "delete-task", "task", String(payload.id), { revision: meta.revision });
   return stateResponse(env, user);
@@ -598,7 +751,7 @@ async function saveScheduleBlocks(request, env) {
 }
 
 export default {
-  async fetch(request, env) {
+  async fetch(request, env, ctx) {
     const url = new URL(request.url);
     if (url.pathname === "/api/login" && request.method === "POST") return login(request, env);
     if (url.pathname === "/api/logout" && request.method === "POST") return logout(request, env);
@@ -610,8 +763,10 @@ export default {
     if (url.pathname === "/api/users" && request.method === "PUT") return updateUser(request, env);
     if (url.pathname === "/api/state" && request.method === "GET") return readState(request, env);
     if (url.pathname === "/api/state" && request.method === "PUT") return writeState(request, env);
-    if (url.pathname === "/api/tasks" && request.method === "POST") return saveTask(request, env, "create");
-    if (url.pathname === "/api/tasks" && request.method === "PUT") return saveTask(request, env, "edit");
+    if (url.pathname === "/api/push/public-key" && request.method === "GET") return pushPublicKey();
+    if (url.pathname === "/api/push/subscribe" && request.method === "POST") return savePushSubscription(request, env);
+    if (url.pathname === "/api/tasks" && request.method === "POST") return saveTask(request, env, "create", ctx);
+    if (url.pathname === "/api/tasks" && request.method === "PUT") return saveTask(request, env, "edit", ctx);
     if (url.pathname === "/api/tasks" && request.method === "DELETE") return deleteTaskRecord(request, env);
     if (url.pathname === "/api/tasks/status" && request.method === "PUT") return updateTaskStatus(request, env);
     if (url.pathname === "/api/tasks/schedule" && request.method === "PUT") return scheduleTaskRecord(request, env);
