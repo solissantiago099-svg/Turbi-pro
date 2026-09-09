@@ -828,6 +828,17 @@ textarea {
   color: #2d6b3c;
 }
 
+.driverTaskCard.scheduleBlockTask {
+  border-color: #dccb9f;
+  background: #fffaf0;
+}
+
+.status.schedule-block {
+  border-color: #dccb9f;
+  background: #fff1cf;
+  color: #765615;
+}
+
 .driverTaskBody {
   display: grid;
   gap: 12px;
@@ -1294,6 +1305,17 @@ textarea {
 .iconBtn.navigationBtn:hover {
   border-color: #1f342b;
   background: #1f342b;
+}
+
+.iconBtn.callIconBtn {
+  border-color: var(--green);
+  color: var(--green);
+  text-decoration: none;
+}
+
+.iconBtn.callIconBtn:hover {
+  background: var(--green);
+  color: #fffdf8;
 }
 
 .summaryCard {

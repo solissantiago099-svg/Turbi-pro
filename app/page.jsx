@@ -35,6 +35,11 @@ function timeToMinutes(value) {
   return Number(hours) * 60 + Number(minutes);
 }
 
+function suggestedBlockEnd(start) {
+  const total = Math.min(timeToMinutes(start) + 60, 23 * 60 + 59);
+  return `${String(Math.floor(total / 60)).padStart(2, "0")}:${String(total % 60).padStart(2, "0")}`;
+}
+
 function scheduleBlocksForDate(blocks, date) {
   return (blocks || []).filter((block) => block.date === date && block.start && block.end);
 }
@@ -409,6 +414,7 @@ export default function Home() {
   const canManageTasks = ["admin", "usuario"].includes(currentRole);
   const canChangeTaskStatus = currentRole === "chofer";
   const driverId = user?.currentDriverId || db.settings?.currentDriverId || 1;
+  const currentDriver = db.drivers.find((driver) => Number(driver.id) === Number(driverId));
   const scheduleBlocks = db.settings?.scheduleBlocks || [];
 
   const dayTasks = useMemo(
@@ -421,24 +427,30 @@ export default function Home() {
     [db.tasks, driverId, routeDate],
   );
 
+  const routeBlocks = useMemo(
+    () => scheduleBlocksForDate(scheduleBlocks, routeDate),
+    [scheduleBlocks, routeDate],
+  );
+
   const nextRouteDate = useMemo(() => {
-    const dates = db.tasks
-      .filter((task) => Number(task.driverId || driverId) === Number(driverId) && task.date > routeDate)
-      .map((task) => task.date)
-      .filter(Boolean)
-      .sort();
+    const dates = [
+      ...db.tasks
+        .filter((task) => Number(task.driverId || driverId) === Number(driverId) && task.date > routeDate)
+        .map((task) => task.date),
+      ...scheduleBlocks.filter((block) => block.date > routeDate).map((block) => block.date),
+    ].filter(Boolean).sort();
     return dates[0] || null;
-  }, [db.tasks, driverId, routeDate]);
+  }, [db.tasks, driverId, routeDate, scheduleBlocks]);
 
   const previousRouteDate = useMemo(() => {
-    const dates = db.tasks
-      .filter((task) => Number(task.driverId || driverId) === Number(driverId) && task.date < routeDate)
-      .map((task) => task.date)
-      .filter(Boolean)
-      .sort()
-      .reverse();
+    const dates = [
+      ...db.tasks
+        .filter((task) => Number(task.driverId || driverId) === Number(driverId) && task.date < routeDate)
+        .map((task) => task.date),
+      ...scheduleBlocks.filter((block) => block.date < routeDate).map((block) => block.date),
+    ].filter(Boolean).sort().reverse();
     return dates[0] || null;
-  }, [db.tasks, driverId, routeDate]);
+  }, [db.tasks, driverId, routeDate, scheduleBlocks]);
   const routeDateTitle = routeDate === localISO()
     ? "Trabajo de hoy"
     : new Date(`${routeDate}T12:00:00`).toLocaleDateString("es-AR", { weekday: "long", day: "numeric", month: "long" });
@@ -924,6 +936,11 @@ export default function Home() {
             <p>{currentView.subtitle}</p>
           </div>
           <div className="topActions">
+            {phoneHref(currentDriver?.phone) ? (
+              <a className="iconBtn callIconBtn" href={phoneHref(currentDriver.phone)} aria-label={`Llamar a ${currentDriver.name}`} title={`Llamar a ${currentDriver.name}`}><Phone size={18} /></a>
+            ) : (
+              <button className="iconBtn callIconBtn" type="button" disabled aria-label="Chofer sin telefono" title="Carga el telefono desde Choferes"><Phone size={18} /></button>
+            )}
             <span className="pill">{roleLabel(user.role)} - {user.name || user.username}</span>
             {pushState !== "enabled" && pushState !== "denied" ? (
               <button className="btn notificationButton" type="button" onClick={enableNotifications} disabled={pushState === "saving"}>
@@ -997,8 +1014,8 @@ export default function Home() {
                   </button>
                 </div>
               </div>
-              <RouteTaskGroup title="Tareas del dia" count={routeTasks.filter((task) => task.start && task.status !== "realizada").length} defaultOpen>
-                <TaskList tasks={routeTasks.filter((task) => task.start && task.status !== "realizada")} db={db} currentUser={user} onStatus={updateTask} onSchedule={scheduleTask} canSchedule={false} canOperate canChangeStatus={canChangeTaskStatus} onEdit={(task) => {
+              <RouteTaskGroup title="Tareas del dia" count={routeTasks.filter((task) => task.start && task.status !== "realizada").length + routeBlocks.length} defaultOpen>
+                <TaskList tasks={routeTasks.filter((task) => task.start && task.status !== "realizada")} blocks={routeBlocks} db={db} currentUser={user} onStatus={updateTask} onSchedule={scheduleTask} canSchedule={false} canOperate canChangeStatus={canChangeTaskStatus} onEdit={(task) => {
                   setEditingTask(task);
                   setTaskPrefill({ date: task.date, time: task.start });
                   setView("nueva");
@@ -1086,13 +1103,44 @@ function RouteTaskGroup({ title, count, defaultOpen = false, children }) {
     </details>
   );
 }
-function TaskList({ tasks, db, currentUser, onStatus, onEdit, onSchedule, canSchedule, canOperate, canChangeStatus }) {
-  if (!tasks.length) return <div className="empty">No hay tareas para este dia.</div>;
+function TaskList({ tasks, blocks = [], db, currentUser, onStatus, onEdit, onSchedule, canSchedule, canOperate, canChangeStatus }) {
+  const entries = [
+    ...tasks.map((task) => ({ kind: "task", start: task.start || "", task })),
+    ...blocks.map((block) => ({ kind: "block", start: block.start || "", block })),
+  ].sort((a, b) => String(a.start).localeCompare(String(b.start)));
+  if (!entries.length) return <div className="empty">No hay tareas para este dia.</div>;
   return (
     <section className="routeTasks">
-      {[...tasks].sort((a, b) => String(a.start || "").localeCompare(String(b.start || ""))).map((task) => {
+      {entries.map((entry) => {
+        if (entry.kind === "block") {
+          const { block } = entry;
+          return (
+            <details className="driverTaskCard scheduleBlockTask" key={`block-${block.id}`}>
+              <summary className="driverTaskHeader">
+                <span className="driverTaskHeading">
+                  <span className="driverTaskTime">{formatTime24(block.start)}</span>
+                  <span className="driverTaskTitleWrap">
+                    <strong className="driverTaskTitle">{block.title || "Horario bloqueado"}</strong>
+                    <small className="taskAssigner">Hasta {formatTime24(block.end)}</small>
+                  </span>
+                </span>
+                <span className="driverTaskHeaderMeta">
+                  <span className="status schedule-block">Bloqueado</span>
+                  <ChevronDown className="driverTaskChevron" size={19} aria-hidden="true" />
+                </span>
+              </summary>
+              <div className="driverTaskBody">
+                <section className="driverTaskBlock highlight">
+                  <span className="eyebrow">AGENDA</span>
+                  <h3>{block.title || "Horario bloqueado"}</h3>
+                  <p>No se asignan tareas de {formatTime24(block.start)} a {formatTime24(block.end)}.</p>
+                </section>
+              </div>
+            </details>
+          );
+        }
 
-
+        const { task } = entry;
         const stops = (task.stops || []).map((stop) => (typeof stop === "string" ? stop : stop.address)).filter(Boolean);
         const destinations = [task.destination, ...stops].filter(Boolean);
         const description = String(task.description || task.observations || "").trim();
@@ -2046,33 +2094,46 @@ function SettingsPanel({ user, users, db, token, revision, onUsers, onUser, onNo
 }
 
 function ScheduleBlocksPanel({ blocks, onSave, onNotify, compact = false, date = "", start = "" }) {
+  const initialStart = start || "10:00";
   const [form, setForm] = useState({
     date: date || localISO(),
-    start: start || "10:00",
-    end: "14:00",
+    start: initialStart,
+    end: suggestedBlockEnd(initialStart),
     title: "",
   });
+  const [validationError, setValidationError] = useState("");
   const sortedBlocks = [...(blocks || [])].sort((a, b) => `${a.date} ${a.start}`.localeCompare(`${b.date} ${b.start}`));
 
   useEffect(() => {
     if (!compact) return;
-    setForm((current) => ({
-      ...current,
-      date: date || current.date,
-      start: start || current.start,
-    }));
+    setForm((current) => {
+      const nextStart = start || current.start;
+      return {
+        ...current,
+        date: date || current.date,
+        start: nextStart,
+        end: timeToMinutes(current.end) > timeToMinutes(nextStart) ? current.end : suggestedBlockEnd(nextStart),
+      };
+    });
   }, [compact, date, start]);
 
   function update(name, value) {
-    setForm((current) => ({ ...current, [name]: value }));
+    setValidationError("");
+    setForm((current) => {
+      const next = { ...current, [name]: value };
+      if (name === "start" && timeToMinutes(next.end) <= timeToMinutes(value)) next.end = suggestedBlockEnd(value);
+      return next;
+    });
   }
 
-  async function submit(event) {
-    event.preventDefault();
+  async function submit() {
     if (timeToMinutes(form.start) >= timeToMinutes(form.end)) {
-      onNotify("El horario de fin debe ser posterior al inicio.", "error");
+      const message = "El horario de fin debe ser posterior al inicio.";
+      setValidationError(message);
+      onNotify(message, "error");
       return;
     }
+    setValidationError("");
     await onSave([
       ...(blocks || []),
       {
@@ -2093,7 +2154,7 @@ function ScheduleBlocksPanel({ blocks, onSave, onNotify, compact = false, date =
 
   const content = (
     <>
-      <form className="scheduleBlockForm" onSubmit={submit}>
+      <div className="scheduleBlockForm">
         <div>
           <label>Dia</label>
           <input type="date" value={form.date} onChange={(event) => update("date", event.target.value)} required />
@@ -2103,15 +2164,16 @@ function ScheduleBlocksPanel({ blocks, onSave, onNotify, compact = false, date =
           <input type="time" value={form.start} onChange={(event) => update("start", event.target.value)} required />
         </div>
         <div>
-          <label>Hasta</label>
+          <label>Hasta <small>(puede superar las 19 hs)</small></label>
           <input type="time" value={form.end} onChange={(event) => update("end", event.target.value)} required />
         </div>
         <div>
           <label>Motivo</label>
           <input value={form.title} onChange={(event) => update("title", event.target.value)} placeholder="Evento, mantenimiento, carga interna..." />
         </div>
-        <button className="btn primary" type="submit"><Plus size={16} /> Bloquear</button>
-      </form>
+        <button className="btn primary" type="button" onClick={submit}><Plus size={16} /> Bloquear</button>
+      </div>
+      {validationError ? <div className="routeNotice scheduleBlockError">{validationError}</div> : null}
       <div className="scheduleBlocksList">
         {sortedBlocks.length ? sortedBlocks.map((block) => (
           <div className="scheduleBlockItem" key={block.id}>

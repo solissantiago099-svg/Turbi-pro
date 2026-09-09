@@ -705,8 +705,11 @@ async function saveScheduleBlocks(request, env) {
   if (!isAdmin(user)) return Response.json({ error: "No autorizado" }, { status: 403 });
   await migrateLegacyState(env);
   const payload = await request.json();
+  const blocks = Array.isArray(payload.blocks) ? payload.blocks : [];
+  const invalidBlock = blocks.find((block) => !block?.date || !block.start || !block.end || timeToMinutes(block.start) >= timeToMinutes(block.end));
+  if (invalidBlock) return Response.json({ error: "El horario de fin debe ser posterior al inicio." }, { status: 400 });
   const settings = await readSettings(env);
-  await writeSettings(env, { ...settings, scheduleBlocks: Array.isArray(payload.blocks) ? payload.blocks : [] }, user);
+  await writeSettings(env, { ...settings, scheduleBlocks: blocks }, user);
   const meta = await bumpRevision(env, user);
   await audit(env, user, "save-schedule-blocks", "settings", "default", { revision: meta.revision });
   return stateResponse(env, user);
