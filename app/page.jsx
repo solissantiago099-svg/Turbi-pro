@@ -35,9 +35,13 @@ function timeToMinutes(value) {
   return Number(hours) * 60 + Number(minutes);
 }
 
+function minutesToTime(total) {
+  const bounded = Math.max(0, Math.min(total, 23 * 60 + 59));
+  return `${String(Math.floor(bounded / 60)).padStart(2, "0")}:${String(bounded % 60).padStart(2, "0")}`;
+}
+
 function suggestedBlockEnd(start) {
-  const total = Math.min(timeToMinutes(start) + 60, 23 * 60 + 59);
-  return `${String(Math.floor(total / 60)).padStart(2, "0")}:${String(total % 60).padStart(2, "0")}`;
+  return minutesToTime(timeToMinutes(start) + 60);
 }
 
 function scheduleBlocksForDate(blocks, date) {
@@ -67,6 +71,15 @@ function blockForHour(blocks, date, hour) {
 
 function blockTimeLabel(block) {
   return `${formatTime24(block.start)} a ${formatTime24(block.end)}`;
+}
+
+function scheduleBlockIdForTask(task) {
+  return task?.scheduleBlockId || (task?.id ? `task-${task.id}` : "");
+}
+
+function scheduleModeForTask(task) {
+  if (task?.scheduleMode === "block" || task?.isScheduleBlock) return "block";
+  return task?.start ? "scheduled" : "unscheduled";
 }
 
 function daysUntil(iso) {
@@ -428,8 +441,10 @@ export default function Home() {
   );
 
   const routeBlocks = useMemo(
-    () => scheduleBlocksForDate(scheduleBlocks, routeDate),
-    [scheduleBlocks, routeDate],
+    () => scheduleBlocksForDate(scheduleBlocks, routeDate).filter((block) => (
+      !routeTasks.some((task) => task.isScheduleBlock && String(task.id) === String(block.taskId))
+    )),
+    [scheduleBlocks, routeDate, routeTasks],
   );
 
   const nextRouteDate = useMemo(() => {
@@ -739,7 +754,9 @@ export default function Home() {
   async function persistTask(nextTask, mode = "create") {
     const previousTask = mode === "edit" ? db.tasks.find((task) => Number(task.id) === Number(nextTask.id)) : null;
     const scheduleChanged = !previousTask || previousTask.date !== nextTask.date || previousTask.start !== nextTask.start;
-    const blocked = scheduleChanged ? findScheduleBlock(nextTask, scheduleBlocks) : null;
+    const ownBlockId = scheduleBlockIdForTask(nextTask);
+    const validationBlocks = ownBlockId ? scheduleBlocks.filter((block) => String(block.id) !== String(ownBlockId)) : scheduleBlocks;
+    const blocked = scheduleChanged ? findScheduleBlock(nextTask, validationBlocks) : null;
     if (blocked) {
       notify(`Ese horario esta bloqueado: ${blocked.title || "Bloqueo operativo"} (${blockTimeLabel(blocked)}).`, "error");
       return;
@@ -759,9 +776,24 @@ export default function Home() {
       notify(`${invalidDoc.name} esta vencido.`, "error");
       return;
     }
+    const blockFromTask = nextTask.isScheduleBlock ? {
+      id: ownBlockId,
+      date: nextTask.date,
+      start: nextTask.start,
+      end: nextTask.blockEnd || minutesToTime(timeToMinutes(nextTask.start) + Number(nextTask.duration || nextTask.assigned || 1)),
+      title: nextTask.title || "Bloqueo operativo",
+      taskId: nextTask.id,
+      createdAt: previousTask?.createdAt || new Date().toISOString(),
+    } : null;
+    const nextBlocks = blockFromTask
+      ? [...scheduleBlocks.filter((block) => String(block.id) !== String(blockFromTask.id)), blockFromTask]
+      : previousTask?.scheduleBlockId
+        ? scheduleBlocks.filter((block) => String(block.id) !== String(previousTask.scheduleBlockId))
+        : scheduleBlocks;
     const nextDb = {
       ...db,
       tasks: mode === "edit" ? db.tasks.map((item) => (Number(item.id) === Number(nextTask.id) ? nextTask : item)) : [...db.tasks, nextTask],
+      settings: { ...(db.settings || {}), scheduleBlocks: nextBlocks },
     };
     await savePartial("/api/tasks", mode === "edit" ? "PUT" : "POST", nextTask, nextDb, mode === "edit" ? "Tarea actualizada" : "Tarea creada");
     setSelectedDate(nextTask.date);
@@ -818,7 +850,15 @@ export default function Home() {
   async function deleteTask(task) {
     const label = task.title || task.description || "esta tarea";
     if (!window.confirm(`¿Eliminar ${label}? Esta accion no se puede deshacer.`)) return;
-    const nextDb = { ...db, tasks: db.tasks.filter((item) => Number(item.id) !== Number(task.id)) };
+    const blockId = scheduleBlockIdForTask(task);
+    const nextDb = {
+      ...db,
+      tasks: db.tasks.filter((item) => Number(item.id) !== Number(task.id)),
+      settings: task.isScheduleBlock ? {
+        ...(db.settings || {}),
+        scheduleBlocks: scheduleBlocks.filter((block) => String(block.id) !== String(blockId)),
+      } : db.settings,
+    };
     await savePartial("/api/tasks", "DELETE", { id: task.id }, nextDb, "Tarea eliminada");
   }
 
@@ -1145,6 +1185,7 @@ function TaskList({ tasks, blocks = [], db, currentUser, onStatus, onEdit, onSch
         const destinations = [task.destination, ...stops].filter(Boolean);
         const description = String(task.description || task.observations || "").trim();
         const title = task.title || task.description || "Tarea sin titulo";
+        const isBlockTask = Boolean(task.isScheduleBlock);
         const assigner = taskAssigner(task);
         const canOperateThisTask = canChangeStatus && Number(task.driverId || currentUser?.currentDriverId) === Number(currentUser?.currentDriverId);
         const startPlace = shortAddress(task.origin);
@@ -1169,9 +1210,9 @@ function TaskList({ tasks, blocks = [], db, currentUser, onStatus, onEdit, onSch
             </summary>
             <div className="driverTaskBody">
               <section className="driverTaskBlock highlight">
-                <span className="eyebrow">INICIO</span>
+                <span className="eyebrow">{isBlockTask ? "BLOQUEO" : "INICIO"}</span>
                 <h3>{task.start ? formatTime24(task.start) : "Sin horario"}</h3>
-                {startPlace ? <p>{startPlace}</p> : null}
+                {isBlockTask && task.blockEnd ? <p>Reservado hasta {formatTime24(task.blockEnd)}</p> : startPlace ? <p>{startPlace}</p> : null}
               </section>
               <section className="driverTaskBlock">
                 <span className="eyebrow">TAREA</span>
@@ -1182,14 +1223,14 @@ function TaskList({ tasks, blocks = [], db, currentUser, onStatus, onEdit, onSch
                 {task.quantities ? <p><b>Cantidades:</b> {task.quantities}</p> : null}
                 {assigner ? <p className="taskAssigner">Asignada por {assigner}</p> : null}
               </section>
-              <section className="driverTaskBlock">
+              {!isBlockTask ? <section className="driverTaskBlock">
                 <span className="eyebrow">FINAL</span>
                 <h3>{endPlace || "Sin destino cargado"}</h3>
                 {stops.length ? <p>Paradas: {stops.map(shortAddress).join(" / ")}</p> : null}
                 {task.distance ? <p>{task.distance} km estimados</p> : null}
-              </section>
+              </section> : null}
               <div className="driverTaskActions">
-                <a className="iconBtn navigationBtn" href={taskGoogleMapsURL(task)} target="_blank" rel="noreferrer" aria-label="Abrir navegacion en Google Maps" title="Abrir navegacion en Google Maps"><MapPin size={19} /></a>
+                {!isBlockTask ? <a className="iconBtn navigationBtn" href={taskGoogleMapsURL(task)} target="_blank" rel="noreferrer" aria-label="Abrir navegacion en Google Maps" title="Abrir navegacion en Google Maps"><MapPin size={19} /></a> : null}
                 {contactPhone ? <a className="btn" href={contactPhone}><Phone size={15} /> Llamar contacto</a> : null}
                 {driverPhone && normalizedRole(currentUser?.role) !== "chofer" ? <a className="btn" href={driverPhone}><Phone size={15} /> Llamar chofer</a> : null}
                 {task.merchandisePdf?.data ? <a className="btn" href={task.merchandisePdf.data} download={task.merchandisePdf.name}>Abrir PDF</a> : null}
@@ -1290,10 +1331,11 @@ function DailyTask({ task, db, canOperate, canChangeStatus, currentUser, onStatu
   const stops = (task.stops || []).map((stop) => (typeof stop === "string" ? stop : stop.address)).filter(Boolean);
   const title = task.title || task.description || "Tarea sin titulo";
   const description = String(task.description || "").trim();
+  const isBlockTask = Boolean(task.isScheduleBlock);
   const assigner = taskAssigner(task);
   const canEdit = canOperate && canEditTask(task, currentUser);
   const canOperateThisTask = canChangeStatus && Number(task.driverId || currentUser?.currentDriverId) === Number(currentUser?.currentDriverId);
-  const summaryRoute = [task.origin, task.destination].map(shortAddress).filter(Boolean).join(" -> ");
+  const summaryRoute = isBlockTask && task.blockEnd ? `Reservado hasta ${formatTime24(task.blockEnd)}` : [task.origin, task.destination].map(shortAddress).filter(Boolean).join(" -> ");
   const driver = db?.drivers?.find((item) => Number(item.id) === Number(task.driverId || currentUser?.currentDriverId));
   const driverPhone = phoneHref(driver?.phone);
   const contactPhone = phoneHref(task.phone);
@@ -1393,7 +1435,7 @@ function DailyTask({ task, db, canOperate, canChangeStatus, currentUser, onStatu
             </>
           ) : (
             <>
-              <a className="btn primary" href={taskGoogleMapsURL(task)} target="_blank" rel="noreferrer">Abrir en Google Maps</a>
+              {!isBlockTask ? <a className="btn primary" href={taskGoogleMapsURL(task)} target="_blank" rel="noreferrer">Abrir en Google Maps</a> : null}
               {driverPhone ? <a className="btn" href={driverPhone}><Phone size={15} /> Llamar chofer</a> : null}
               {contactPhone ? <a className="btn" href={contactPhone}><Phone size={15} /> Llamar contacto</a> : null}
               {task.merchandisePdf?.data ? <a className="btn" href={task.merchandisePdf.data} download={task.merchandisePdf.name}>Abrir PDF</a> : null}
@@ -1427,6 +1469,8 @@ function taskToForm(task, prefill, currentDriverId, db) {
     start: task?.start || prefill.time || "",
     assigned: task?.assigned ? String(task.assigned) : task?.duration ? String(task.duration) : "",
     duration: task?.duration ? String(task.duration) : task?.assigned ? String(task.assigned) : "",
+    scheduleMode: task ? scheduleModeForTask(task) : prefill.time ? "scheduled" : "unscheduled",
+    blockEnd: task?.blockEnd || (task?.start && task?.duration ? minutesToTime(timeToMinutes(task.start) + Number(task.duration || task.assigned || 0)) : ""),
     origin: task?.origin || "",
     stops: Array.isArray(task?.stops) ? task.stops.map((stop) => (typeof stop === "string" ? stop : stop.address)).filter(Boolean) : [],
     destination: task?.destination || "",
@@ -1473,14 +1517,29 @@ function NewTaskForm({ db, prefill, initialTask = null, currentDriverId, canAssi
     return () => window.clearTimeout(timer);
   }, [form.origin, form.destination, form.stops]);
 
-  const selectedScheduleBlock = useMemo(() => (
-    canSetSchedule && form.start
-      ? findScheduleBlock({ date: form.date || localISO(), start: form.start, assigned: Number(form.assigned || form.duration || 1) }, scheduleBlocks)
-      : null
-  ), [canSetSchedule, form.date, form.start, form.assigned, form.duration, scheduleBlocks]);
+  const selectedScheduleBlock = useMemo(() => {
+    if (!canSetSchedule || !form.start || form.scheduleMode === "block") return null;
+    const ownBlockId = scheduleBlockIdForTask(initialTask);
+    const availableBlocks = ownBlockId ? scheduleBlocks.filter((block) => String(block.id) !== String(ownBlockId)) : scheduleBlocks;
+    return findScheduleBlock({ date: form.date || localISO(), start: form.start, assigned: Number(form.assigned || form.duration || 1) }, availableBlocks);
+  }, [canSetSchedule, form.date, form.start, form.assigned, form.duration, form.scheduleMode, scheduleBlocks, initialTask]);
 
   function update(name, value) {
-    setForm((current) => ({ ...current, [name]: value }));
+    setForm((current) => {
+      const next = { ...current, [name]: value };
+      if (name === "scheduleMode") {
+        if (value === "unscheduled") next.start = "";
+        if (value === "scheduled" && !next.start) next.start = prefill.time || "09:00";
+        if (value === "block") {
+          if (!next.start) next.start = prefill.time || "09:00";
+          if (!next.blockEnd || timeToMinutes(next.blockEnd) <= timeToMinutes(next.start)) next.blockEnd = suggestedBlockEnd(next.start);
+        }
+      }
+      if (name === "start" && next.scheduleMode === "block" && timeToMinutes(next.blockEnd) <= timeToMinutes(value)) {
+        next.blockEnd = suggestedBlockEnd(value);
+      }
+      return next;
+    });
   }
 
   function addStop() {
@@ -1527,6 +1586,12 @@ function NewTaskForm({ db, prefill, initialTask = null, currentDriverId, canAssi
   async function submit(event) {
     event.preventDefault();
     if (selectedScheduleBlock) return;
+    const scheduleMode = canSetSchedule ? form.scheduleMode : scheduleModeForTask(initialTask);
+    const isBlock = scheduleMode === "block";
+    if (isBlock && (!form.start || timeToMinutes(form.start) >= timeToMinutes(form.blockEnd))) {
+      onError("Para bloquear, la hora de fin debe ser posterior al inicio.");
+      return;
+    }
     let merchandisePdf = initialTask?.merchandisePdf || null;
     if (pdf) {
       if (pdf.type !== "application/pdf") {
@@ -1539,9 +1604,11 @@ function NewTaskForm({ db, prefill, initialTask = null, currentDriverId, canAssi
       }
       merchandisePdf = { name: pdf.name, size: pdf.size, data: await fileToDataURL(pdf) };
     }
+    const taskId = initialTask?.id || Date.now();
+    const blockDuration = isBlock ? Math.max(1, timeToMinutes(form.blockEnd) - timeToMinutes(form.start)) : 0;
     await onCreate({
       ...initialTask,
-      id: initialTask?.id || Date.now(),
+      id: taskId,
       title: form.title,
       description: form.title,
       merchandise: form.merchandise,
@@ -1549,9 +1616,13 @@ function NewTaskForm({ db, prefill, initialTask = null, currentDriverId, canAssi
       merchandisePdf,
       observations: form.observations,
       date: canSetSchedule ? (form.date || localISO()) : (initialTask?.date || form.date || localISO()),
-      start: canSetSchedule ? form.start : (initialTask?.start || ""),
-      assigned: 0,
-      duration: 0,
+      start: canSetSchedule && scheduleMode !== "unscheduled" ? form.start : (initialTask?.start || ""),
+      assigned: blockDuration,
+      duration: blockDuration,
+      scheduleMode,
+      isScheduleBlock: isBlock,
+      scheduleBlockId: isBlock ? scheduleBlockIdForTask({ ...initialTask, id: taskId }) : "",
+      blockEnd: isBlock ? form.blockEnd : "",
       origin: form.origin,
       destination: form.destination,
       stops: form.stops.map((value) => value.trim()).filter(Boolean),
@@ -1590,21 +1661,26 @@ function NewTaskForm({ db, prefill, initialTask = null, currentDriverId, canAssi
           <textarea value={form.observations} onChange={(event) => update("observations", event.target.value)} />
           {canSetSchedule ? (
             <>
-              <label>Horario <small>(opcional)</small></label>
+              <label>Horario</label>
+              <div className="scheduleModeControl" role="group" aria-label="Modo de horario">
+                <button className={form.scheduleMode === "scheduled" ? "active" : ""} type="button" onClick={() => update("scheduleMode", "scheduled")}>Ponerle horario</button>
+                <button className={form.scheduleMode === "unscheduled" ? "active" : ""} type="button" onClick={() => update("scheduleMode", "unscheduled")}>Sin horario</button>
+                {canManageBlocks ? <button className={form.scheduleMode === "block" ? "active" : ""} type="button" onClick={() => update("scheduleMode", "block")}>Habilitar bloqueo</button> : null}
+              </div>
               <div className="row">
                 <div><label>Fecha</label><input type="date" value={form.date} onChange={(event) => update("date", event.target.value)} /></div>
-                <div><label>Hora de inicio</label><input type="time" value={form.start} onChange={(event) => update("start", event.target.value)} /></div>
+                {form.scheduleMode !== "unscheduled" ? <div><label>Hora de inicio</label><input type="time" value={form.start} onChange={(event) => update("start", event.target.value)} /></div> : null}
               </div>
-              {canManageBlocks ? (
-                <ScheduleBlocksPanel
-                  blocks={scheduleBlocks}
-                  date={form.date}
-                  start={form.start}
-                  taskTitle={form.title}
-                  onSave={onScheduleBlocks}
-                  onNotify={onError}
-                  compact
-                />
+              {form.scheduleMode === "block" ? (
+                <div className="inlineBlockFields">
+                  <div>
+                    <label>Hasta <small>(puede superar las 19 hs)</small></label>
+                    <input type="time" value={form.blockEnd} onChange={(event) => update("blockEnd", event.target.value)} />
+                  </div>
+                  <div className="routeNotice">
+                    Se va a guardar como tarea interna para el chofer y bloqueara la agenda con el titulo cargado arriba.
+                  </div>
+                </div>
               ) : null}
             </>
           ) : (
@@ -1655,7 +1731,7 @@ function NewTaskForm({ db, prefill, initialTask = null, currentDriverId, canAssi
 
         <div className="actions">
           <button className="btn" type="button" onClick={onCancel}>Cancelar</button>
-          <button className="btn primary" disabled={calculating || Boolean(selectedScheduleBlock)}>{isEditing ? "Guardar cambios" : "Guardar y asignar tarea"}</button>
+          <button className="btn primary" disabled={calculating || Boolean(selectedScheduleBlock)}>{isEditing ? "Guardar cambios" : form.scheduleMode === "block" ? "Guardar bloqueo y asignar" : "Guardar y asignar tarea"}</button>
         </div>
         {selectedScheduleBlock ? (
           <div className="routeNotice scheduleBlockError">

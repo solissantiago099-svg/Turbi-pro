@@ -1506,6 +1506,37 @@ textarea {
   margin-bottom: 16px;
 }
 
+.scheduleModeControl {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin: 8px 0 12px;
+}
+
+.scheduleModeControl button {
+  min-height: 38px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  padding: 8px 12px;
+  background: #fffdf8;
+  color: var(--muted);
+  font-weight: 900;
+}
+
+.scheduleModeControl button.active {
+  border-color: var(--green);
+  background: #edf5df;
+  color: var(--green-dark);
+}
+
+.inlineBlockFields {
+  display: grid;
+  grid-template-columns: 180px minmax(0, 1fr);
+  gap: 12px;
+  align-items: end;
+  margin-top: 10px;
+}
+
 .scheduleBlockForm {
   display: grid;
   grid-template-columns: 160px 130px 130px minmax(180px, 1fr) auto;
@@ -1823,7 +1854,8 @@ textarea {
   }
 
   .dailyMeta,
-  .formLayout {
+  .formLayout,
+  .inlineBlockFields {
     grid-template-columns: 1fr;
   }
 

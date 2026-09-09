@@ -153,6 +153,10 @@ function findScheduleBlock(task, blocks) {
   return scheduleBlocksForDate(blocks, task.date).find((block) => rangesOverlap(start, end, timeToMinutes(block.start), timeToMinutes(block.end))) || null;
 }
 
+function scheduleBlockIdForTask(task) {
+  return task?.scheduleBlockId || (task?.id ? "task-" + task.id : "");
+}
+
 function canEditTaskRecord(task, user) {
   return isAdmin(user) || Boolean(task?.assignedByUserId && user?.id && String(task.assignedByUserId) === String(user.id));
 }
@@ -624,9 +628,35 @@ async function saveTask(request, env, mode, ctx) {
     nextTask.assignedByUserName = existing.assignedByUserName;
   }
   const settings = await readSettings(env);
-  const blocked = findScheduleBlock(nextTask, settings.scheduleBlocks || []);
+  const ownBlockId = scheduleBlockIdForTask(nextTask);
+  const scheduleBlocks = settings.scheduleBlocks || [];
+  const validationBlocks = ownBlockId ? scheduleBlocks.filter((block) => String(block.id) !== String(ownBlockId)) : scheduleBlocks;
+  const blocked = findScheduleBlock(nextTask, validationBlocks);
   if (blocked) return Response.json({ error: "Ese horario esta bloqueado: " + (blocked.title || "Bloqueo operativo") + "." }, { status: 400 });
+  let block = null;
+  if (nextTask.isScheduleBlock) {
+    const start = timeToMinutes(nextTask.start);
+    const fallbackEnd = start + Number(nextTask.duration || nextTask.assigned || 1);
+    const blockEnd = nextTask.blockEnd || String(Math.floor(fallbackEnd / 60)).padStart(2, "0") + ":" + String(fallbackEnd % 60).padStart(2, "0");
+    if (!nextTask.date || !nextTask.start || timeToMinutes(blockEnd) <= start) return Response.json({ error: "El horario de fin debe ser posterior al inicio." }, { status: 400 });
+    block = {
+      id: ownBlockId,
+      date: nextTask.date,
+      start: nextTask.start,
+      end: blockEnd,
+      title: nextTask.title || "Bloqueo operativo",
+      taskId: nextTask.id,
+      createdAt: nextTask.createdAt || new Date().toISOString(),
+    };
+  }
   await storeRecord(env, "task", nextTask);
+  if (block) {
+    const nextBlocks = [...scheduleBlocks.filter((item) => String(item.id) !== String(block.id)), block];
+    await writeSettings(env, { ...settings, scheduleBlocks: nextBlocks }, user);
+  } else if (existing?.scheduleBlockId) {
+    const nextBlocks = scheduleBlocks.filter((item) => String(item.id) !== String(existing.scheduleBlockId));
+    await writeSettings(env, { ...settings, scheduleBlocks: nextBlocks }, user);
+  }
   const meta = await bumpRevision(env, user);
   await audit(env, user, mode === "create" ? "create-task" : "update-task", "task", String(nextTask.id), { revision: meta.revision });
   const shouldNotify = nextTask.driverId && (mode === "create" || Number(existing?.driverId || 0) !== Number(nextTask.driverId));
@@ -682,6 +712,11 @@ async function deleteTaskRecord(request, env) {
   if (!task) return Response.json({ error: "Tarea inexistente" }, { status: 404 });
   if (!canEditTaskRecord(task, user)) return Response.json({ error: "Solo puede eliminar la tarea el usuario que la asigno o un admin." }, { status: 403 });
   await env.DB.prepare("DELETE FROM app_records WHERE type = ? AND id = ?").bind("task", String(payload.id)).run();
+  if (task.isScheduleBlock) {
+    const settings = await readSettings(env);
+    const blockId = scheduleBlockIdForTask(task);
+    await writeSettings(env, { ...settings, scheduleBlocks: (settings.scheduleBlocks || []).filter((block) => String(block.id) !== String(blockId)) }, user);
+  }
   const meta = await bumpRevision(env, user);
   await audit(env, user, "delete-task", "task", String(payload.id), { revision: meta.revision });
   return stateResponse(env, user);
