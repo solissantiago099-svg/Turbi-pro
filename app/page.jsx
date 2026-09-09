@@ -1674,11 +1674,8 @@ function NewTaskForm({ db, prefill, initialTask = null, currentDriverId, canAssi
               {form.scheduleMode === "block" ? (
                 <div className="inlineBlockFields">
                   <div>
-                    <label>Hasta <small>(puede superar las 19 hs)</small></label>
+                    <label>Hasta</label>
                     <input type="time" value={form.blockEnd} onChange={(event) => update("blockEnd", event.target.value)} />
-                  </div>
-                  <div className="routeNotice">
-                    Se va a guardar como tarea interna para el chofer y bloqueara la agenda con el titulo cargado arriba.
                   </div>
                 </div>
               ) : null}
