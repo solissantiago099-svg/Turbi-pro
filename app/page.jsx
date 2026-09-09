@@ -1473,6 +1473,12 @@ function NewTaskForm({ db, prefill, initialTask = null, currentDriverId, canAssi
     return () => window.clearTimeout(timer);
   }, [form.origin, form.destination, form.stops]);
 
+  const selectedScheduleBlock = useMemo(() => (
+    canSetSchedule && form.start
+      ? findScheduleBlock({ date: form.date || localISO(), start: form.start, assigned: Number(form.assigned || form.duration || 1) }, scheduleBlocks)
+      : null
+  ), [canSetSchedule, form.date, form.start, form.assigned, form.duration, scheduleBlocks]);
+
   function update(name, value) {
     setForm((current) => ({ ...current, [name]: value }));
   }
@@ -1520,6 +1526,7 @@ function NewTaskForm({ db, prefill, initialTask = null, currentDriverId, canAssi
 
   async function submit(event) {
     event.preventDefault();
+    if (selectedScheduleBlock) return;
     let merchandisePdf = initialTask?.merchandisePdf || null;
     if (pdf) {
       if (pdf.type !== "application/pdf") {
@@ -1648,8 +1655,13 @@ function NewTaskForm({ db, prefill, initialTask = null, currentDriverId, canAssi
 
         <div className="actions">
           <button className="btn" type="button" onClick={onCancel}>Cancelar</button>
-          <button className="btn primary" disabled={calculating}>{isEditing ? "Guardar cambios" : "Guardar y asignar tarea"}</button>
+          <button className="btn primary" disabled={calculating || Boolean(selectedScheduleBlock)}>{isEditing ? "Guardar cambios" : "Guardar y asignar tarea"}</button>
         </div>
+        {selectedScheduleBlock ? (
+          <div className="routeNotice scheduleBlockError">
+            Ese horario ya quedo bloqueado como {selectedScheduleBlock.title || "Bloqueo operativo"}. No hace falta guardar una tarea encima.
+          </div>
+        ) : null}
       </form>
       <aside className="summaryCard">
         <span className="eyebrow">RESUMEN</span>
