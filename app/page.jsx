@@ -1026,7 +1026,8 @@ export default function Home() {
                 </div>
                 {canManageTasks ? <button className="btn primary" onClick={() => { setEditingTask(null); setTaskPrefill({ date: selectedDate, time: "" }); setView("nueva"); }}>Agregar tarea</button> : null}
               </div>
-              <div className="week">
+              <div className="agendaStickyNav">
+                <div className="week">
                 {week.map((day) => (
                   <button key={day.iso} className={`dayChip ${selectedDate === day.iso ? "active" : ""} ${day.completed ? "completed" : ""}`} onClick={() => setSelectedDate(day.iso)}>
                     {day.count > 0 ? <span className="taskDot" aria-label={`${day.count} tareas asignadas`} title={`${day.count} tareas asignadas`} /> : null}
@@ -1035,12 +1036,17 @@ export default function Home() {
                     <small>{day.count} tareas</small>
                   </button>
                 ))}
+                </div>
+                <div className="scheduleSummary">
+                  <span><b>{dayTasks.length}</b> tareas del dia</span>
+                </div>
               </div>
               <DailySchedule
                 date={selectedDate}
                 tasks={dayTasks}
                 db={db}
                 scheduleBlocks={scheduleBlocks}
+                showSummary={false}
                 canCreate={canManageTasks}
                 currentUser={user}
                 canChangeStatus={false}
@@ -1301,7 +1307,7 @@ function TaskSchedule({ task, onSchedule }) {
     </form>
   );
 }
-function DailySchedule({ date, tasks, db, scheduleBlocks = [], canCreate, canChangeStatus, currentUser, onFreeSlot, onStatus, onEdit, onDelete, onSave }) {
+function DailySchedule({ date, tasks, db, scheduleBlocks = [], showSummary = true, canCreate, canChangeStatus, currentUser, onFreeSlot, onStatus, onEdit, onDelete, onSave }) {
   const hours = Array.from({ length: 13 }, (_, index) => index + 7);
   const outside = tasks.filter((task) => {
     const hour = Number(String(task.start || "00:00").split(":")[0]);
@@ -1310,9 +1316,11 @@ function DailySchedule({ date, tasks, db, scheduleBlocks = [], canCreate, canCha
 
   return (
     <section className="dailySchedule">
-      <div className="scheduleSummary">
-        <span><b>{tasks.length}</b> tareas del dia</span>
-      </div>
+      {showSummary ? (
+        <div className="scheduleSummary">
+          <span><b>{tasks.length}</b> tareas del dia</span>
+        </div>
+      ) : null}
       <div className="scheduleList">
         {hours.map((hour) => {
           const hourValue = `${String(hour).padStart(2, "0")}:00`;

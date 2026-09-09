@@ -403,6 +403,23 @@ textarea {
   color: var(--ink);
 }
 
+.agendaStickyNav {
+  position: sticky;
+  top: 88px;
+  z-index: 7;
+  padding-top: 8px;
+  background: linear-gradient(180deg, rgba(250, 247, 239, 0.98) 0%, rgba(250, 247, 239, 0.95) 86%, rgba(250, 247, 239, 0) 100%);
+  backdrop-filter: blur(10px);
+}
+
+.agendaStickyNav .week {
+  margin-bottom: 8px;
+}
+
+.agendaStickyNav .scheduleSummary {
+  position: static;
+  border-radius: 8px 8px 0 0;
+}
 .week {
   display: grid;
   grid-auto-flow: column;
@@ -1797,6 +1814,16 @@ textarea {
     grid-template-columns: 1fr;
   }
 
+  .agendaStickyNav {
+    top: 72px;
+    margin-inline: -12px;
+    padding: 7px 12px 0;
+  }
+
+  .agendaStickyNav .week {
+    margin-inline: -12px;
+    margin-bottom: 7px;
+  }
   .week {
     display: flex;
     overflow-x: auto;
