@@ -1016,6 +1016,10 @@ textarea {
   color: var(--green-dark);
 }
 
+.notificationButton {
+  background: #fffdf8;
+}
+
 .empty {
   border: 1px dashed #c8bfb2;
   border-radius: 8px;

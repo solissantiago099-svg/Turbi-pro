@@ -1,7 +1,9 @@
 "use client";
 
 import { useEffect, useMemo, useRef, useState } from "react";
-import { CalendarDays, ChevronDown, ChevronLeft, ChevronRight, Download, Edit3, LogOut, MapPin, Menu, Plus, Route, Search, Settings, Trash2, Truck, UserPlus, Users, X } from "lucide-react";
+import { Bell, CalendarDays, ChevronDown, ChevronLeft, ChevronRight, Download, Edit3, LogOut, MapPin, Menu, Plus, Route, Search, Settings, Trash2, Truck, UserPlus, Users, X } from "lucide-react";
+
+const VAPID_PUBLIC_KEY = "BOgzmxTmjpL2edxhwwe1W0MYXq_NsI-4NiJm2uNYJdMNM9HZgFNIxP6yrGJSmtnfa-aVEmAlr6nn8Q-zbQEAm7g";
 
 const views = [
   { id: "agenda", label: "Agenda", subtitle: "Planificacion diaria", icon: CalendarDays, roles: ["admin", "usuario"] },
@@ -270,6 +272,15 @@ function publicLocalUsers(users = localUsers) {
   return users.map(({ password: _password, ...user }) => user);
 }
 
+function urlBase64ToUint8Array(value) {
+  const padding = "=".repeat((4 - (value.length % 4)) % 4);
+  const base64 = (value + padding).replace(/-/g, "+").replace(/_/g, "/");
+  const raw = window.atob(base64);
+  const output = new Uint8Array(raw.length);
+  for (let index = 0; index < raw.length; index += 1) output[index] = raw.charCodeAt(index);
+  return output;
+}
+
 async function localApiFetch(path, options = {}) {
   const method = options.method || "GET";
   const savedUsers = JSON.parse(localStorage.getItem("tamiz_local_users") || "null") || localUsers;
@@ -298,6 +309,8 @@ async function localApiFetch(path, options = {}) {
     upstream.searchParams.set("steps", "false");
     return fetch(upstream.toString(), { headers: { accept: "application/json" } });
   }
+  if (path === "/api/push/public-key" && method === "GET") return localResponse({ publicKey: VAPID_PUBLIC_KEY, supported: true });
+  if (path === "/api/push/subscribe" && method === "POST") return localResponse({ ok: true });
   if (path === "/api/login" && method === "POST") {
     const credentials = JSON.parse(options.body || "{}");
     const found = savedUsers.find((item) => item.username === String(credentials.username || "").toLowerCase() && item.password === credentials.password);
@@ -380,6 +393,7 @@ export default function Home() {
   const [menuOpen, setMenuOpen] = useState(false);
   const [toast, setToast] = useState(null);
   const [installBanner, setInstallBanner] = useState({ visible: false, mode: "" });
+  const [pushState, setPushState] = useState("idle");
   const [taskPrefill, setTaskPrefill] = useState({ date: localISO(), time: "" });
   const [editingTask, setEditingTask] = useState(null);
 
@@ -533,6 +547,12 @@ export default function Home() {
   }, [token, user]);
 
   useEffect(() => {
+    if (!user || !("Notification" in window)) return;
+    if (Notification.permission === "granted") setPushState("enabled");
+    if (Notification.permission === "denied") setPushState("denied");
+  }, [user]);
+
+  useEffect(() => {
     if (!user || canAccessView(currentRole, currentView)) return;
     const fallback = visibleViews[0]?.id || (currentRole === "chofer" ? "ruta" : "agenda");
     setView(fallback);
@@ -600,6 +620,45 @@ export default function Home() {
   function dismissInstallBanner() {
     localStorage.setItem("tamiz_install_dismissed", "1");
     setInstallBanner({ visible: false, mode: "" });
+  }
+
+  async function enableNotifications() {
+    if (!("Notification" in window) || !("serviceWorker" in navigator) || !("PushManager" in window)) {
+      notify("Este navegador no permite notificaciones push.", "error");
+      return;
+    }
+    setPushState("saving");
+    try {
+      const permission = await Notification.requestPermission();
+      if (permission !== "granted") {
+        setPushState("denied");
+        notify("Permiso de notificaciones no habilitado.", "error");
+        return;
+      }
+      const registration = await navigator.serviceWorker.ready;
+      const keyResponse = await appFetch("/api/push/public-key", { headers: apiHeaders(token, { accept: "application/json" }) });
+      const keyPayload = await keyResponse.json().catch(() => ({}));
+      if (!keyResponse.ok || !keyPayload.publicKey) throw new Error("No se pudo preparar notificaciones");
+      let subscription = await registration.pushManager.getSubscription();
+      if (!subscription) {
+        subscription = await registration.pushManager.subscribe({
+          userVisibleOnly: true,
+          applicationServerKey: urlBase64ToUint8Array(keyPayload.publicKey),
+        });
+      }
+      const response = await appFetch("/api/push/subscribe", {
+        method: "POST",
+        headers: apiHeaders(token, { "content-type": "application/json" }),
+        body: JSON.stringify({ subscription }),
+      });
+      const payload = await response.json().catch(() => ({}));
+      if (!response.ok) throw new Error(payload.error || "No se pudo activar avisos");
+      setPushState("enabled");
+      notify("Avisos activados en este dispositivo");
+    } catch (error) {
+      setPushState("idle");
+      notify(error.message || "No se pudieron activar los avisos.", "error");
+    }
   }
 
   function beginMenuSwipe(event) {
@@ -861,6 +920,11 @@ export default function Home() {
           </div>
           <div className="topActions">
             <span className="pill">{roleLabel(user.role)} - {user.name || user.username}</span>
+            {pushState !== "enabled" && pushState !== "denied" ? (
+              <button className="btn notificationButton" type="button" onClick={enableNotifications} disabled={pushState === "saving"}>
+                <Bell size={16} /> {pushState === "saving" ? "Activando..." : "Activar avisos"}
+              </button>
+            ) : null}
             <button className="btn" onClick={logout}>
               <LogOut size={16} /> Salir
             </button>

@@ -53,6 +53,7 @@ const assets = Object.fromEntries(listFiles(out).map((absolute) => {
 assets["/"] = assets["/index.html"];
 
 const worker = `const ASSETS = ${JSON.stringify(assets)};
+const VAPID_PUBLIC_KEY = "BOgzmxTmjpL2edxhwwe1W0MYXq_NsI-4NiJm2uNYJdMNM9HZgFNIxP6yrGJSmtnfa-aVEmAlr6nn8Q-zbQEAm7g";
 
 function decode(base64) {
   const binary = atob(base64);
@@ -372,6 +373,102 @@ async function writeSettings(env, settings, user) {
     .run();
 }
 
+async function readSettingKey(env, key, fallback) {
+  const row = await env.DB.prepare("SELECT value FROM app_settings WHERE key = ?").bind(key).first();
+  return row ? JSON.parse(row.value) : fallback;
+}
+
+async function writeSettingKey(env, key, value, user) {
+  const now = new Date().toISOString();
+  await env.DB.prepare("INSERT INTO app_settings (key, value, updated_at, updated_by) VALUES (?, ?, ?, ?) ON CONFLICT(key) DO UPDATE SET value = excluded.value, updated_at = excluded.updated_at, updated_by = excluded.updated_by")
+    .bind(key, JSON.stringify(value), now, user?.id || null)
+    .run();
+}
+
+function base64UrlBytes(bytes) {
+  let binary = "";
+  const view = bytes instanceof Uint8Array ? bytes : new Uint8Array(bytes);
+  for (const byte of view) binary += String.fromCharCode(byte);
+  return btoa(binary).replace(/=/g, "").replace(/\\+/g, "-").replace(/\\//g, "_");
+}
+
+function base64UrlText(value) {
+  return base64UrlBytes(new TextEncoder().encode(value));
+}
+
+async function vapidToken(env, audience) {
+  if (!env.TAMIZ_VAPID_PRIVATE_JWK) return "";
+  const jwk = JSON.parse(env.TAMIZ_VAPID_PRIVATE_JWK);
+  const key = await crypto.subtle.importKey("jwk", jwk, { name: "ECDSA", namedCurve: "P-256" }, false, ["sign"]);
+  const header = base64UrlText(JSON.stringify({ typ: "JWT", alg: "ES256" }));
+  const payload = base64UrlText(JSON.stringify({ aud: audience, exp: Math.floor(Date.now() / 1000) + 43200, sub: "mailto:operaciones@tamiz.local" }));
+  const unsigned = header + "." + payload;
+  const signature = await crypto.subtle.sign({ name: "ECDSA", hash: "SHA-256" }, key, new TextEncoder().encode(unsigned));
+  return unsigned + "." + base64UrlBytes(signature);
+}
+
+async function readPushSubscriptions(env) {
+  return await readSettingKey(env, "push_subscriptions", []);
+}
+
+async function savePushSubscription(request, env) {
+  const user = await currentUser(request, env);
+  if (!user) return Response.json({ error: "Se requiere inicio de sesion" }, { status: 401 });
+  const payload = await request.json();
+  const subscription = payload?.subscription;
+  if (!subscription?.endpoint || !subscription?.keys?.p256dh || !subscription?.keys?.auth) {
+    return Response.json({ error: "Suscripcion invalida" }, { status: 400 });
+  }
+  const current = await readPushSubscriptions(env);
+  const next = current.filter((item) => item.subscription?.endpoint !== subscription.endpoint);
+  next.push({
+    id: crypto.randomUUID(),
+    userId: user.id,
+    username: user.username || "",
+    role: normalizedRole(user.role),
+    currentDriverId: user.currentDriverId || null,
+    subscription,
+    updatedAt: new Date().toISOString(),
+  });
+  await writeSettingKey(env, "push_subscriptions", next.slice(-250), user);
+  await audit(env, user, "subscribe-push", "user", user.id);
+  return Response.json({ ok: true }, { headers: { "cache-control": "no-store" } });
+}
+
+function taskNotificationTargets(subscriptions, task) {
+  if (!task?.driverId) return [];
+  return subscriptions.filter((item) => normalizedRole(item.role) === "chofer" && Number(item.currentDriverId) === Number(task.driverId));
+}
+
+async function sendPush(subscription, env) {
+  const endpoint = subscription?.endpoint || "";
+  if (!endpoint) return { ok: false };
+  const audience = new URL(endpoint).origin;
+  const token = await vapidToken(env, audience);
+  if (!token) return { ok: false };
+  const response = await fetch(endpoint, {
+    method: "POST",
+    headers: {
+      TTL: "86400",
+      Urgency: "normal",
+      Authorization: "vapid t=" + token + ", k=" + VAPID_PUBLIC_KEY,
+    },
+  });
+  return { ok: response.ok, gone: response.status === 404 || response.status === 410 };
+}
+
+async function notifyTaskAssignment(env, task, user) {
+  if (!env.TAMIZ_VAPID_PRIVATE_JWK || !task?.driverId) return;
+  const subscriptions = await readPushSubscriptions(env);
+  const targets = taskNotificationTargets(subscriptions, task);
+  if (!targets.length) return;
+  const results = await Promise.allSettled(targets.map((item) => sendPush(item.subscription, env)));
+  const goneEndpoints = new Set(results.map((result, index) => result.status === "fulfilled" && result.value.gone ? targets[index].subscription.endpoint : null).filter(Boolean));
+  if (goneEndpoints.size) {
+    await writeSettingKey(env, "push_subscriptions", subscriptions.filter((item) => !goneEndpoints.has(item.subscription?.endpoint)), user);
+  }
+}
+
 async function revisionInfo(env) {
   const row = await env.DB.prepare("SELECT revision, updated_at AS updatedAt, updated_by AS updatedBy FROM app_meta WHERE key = ?").bind("state").first();
   return row || { revision: 0, updatedAt: null, updatedBy: null };
@@ -451,6 +548,10 @@ async function readState(request, env) {
   return stateResponse(env, user);
 }
 
+function pushPublicKey() {
+  return Response.json({ publicKey: VAPID_PUBLIC_KEY, supported: true }, { headers: { "cache-control": "no-store" } });
+}
+
 async function writeState(request, env) {
   const user = await currentUser(request, env);
   if (!user) return Response.json({ error: "Se requiere inicio de sesion" }, { status: 401 });
@@ -496,7 +597,7 @@ async function writeState(request, env) {
   return stateResponse(env, user);
 }
 
-async function saveTask(request, env, mode) {
+async function saveTask(request, env, mode, ctx) {
   const user = await currentUser(request, env);
   if (!user) return Response.json({ error: "Se requiere inicio de sesion" }, { status: 401 });
   await migrateLegacyState(env);
@@ -520,6 +621,12 @@ async function saveTask(request, env, mode) {
   await storeRecord(env, "task", nextTask);
   const meta = await bumpRevision(env, user);
   await audit(env, user, mode === "create" ? "create-task" : "update-task", "task", String(nextTask.id), { revision: meta.revision });
+  const shouldNotify = nextTask.driverId && (mode === "create" || Number(existing?.driverId || 0) !== Number(nextTask.driverId));
+  if (shouldNotify) {
+    const notification = notifyTaskAssignment(env, nextTask, user).catch(() => null);
+    if (ctx?.waitUntil) ctx.waitUntil(notification);
+    else await notification;
+  }
   return stateResponse(env, user);
 }
 
@@ -598,7 +705,7 @@ async function saveScheduleBlocks(request, env) {
 }
 
 export default {
-  async fetch(request, env) {
+  async fetch(request, env, ctx) {
     const url = new URL(request.url);
     if (url.pathname === "/api/login" && request.method === "POST") return login(request, env);
     if (url.pathname === "/api/logout" && request.method === "POST") return logout(request, env);
@@ -610,8 +717,10 @@ export default {
     if (url.pathname === "/api/users" && request.method === "PUT") return updateUser(request, env);
     if (url.pathname === "/api/state" && request.method === "GET") return readState(request, env);
     if (url.pathname === "/api/state" && request.method === "PUT") return writeState(request, env);
-    if (url.pathname === "/api/tasks" && request.method === "POST") return saveTask(request, env, "create");
-    if (url.pathname === "/api/tasks" && request.method === "PUT") return saveTask(request, env, "edit");
+    if (url.pathname === "/api/push/public-key" && request.method === "GET") return pushPublicKey();
+    if (url.pathname === "/api/push/subscribe" && request.method === "POST") return savePushSubscription(request, env);
+    if (url.pathname === "/api/tasks" && request.method === "POST") return saveTask(request, env, "create", ctx);
+    if (url.pathname === "/api/tasks" && request.method === "PUT") return saveTask(request, env, "edit", ctx);
     if (url.pathname === "/api/tasks" && request.method === "DELETE") return deleteTaskRecord(request, env);
     if (url.pathname === "/api/tasks/status" && request.method === "PUT") return updateTaskStatus(request, env);
     if (url.pathname === "/api/tasks/schedule" && request.method === "PUT") return scheduleTaskRecord(request, env);
