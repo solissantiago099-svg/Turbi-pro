@@ -237,6 +237,20 @@ function taskAssigner(task) {
   return task?.assignedByUserName || task?.assignedBy || "";
 }
 
+function formatCreatedTime(value) {
+  if (!value) return "";
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) return "";
+  return date.toLocaleTimeString("es-AR", { hour: "2-digit", minute: "2-digit" });
+}
+
+function taskAssignerLabel(task) {
+  const assigner = taskAssigner(task);
+  if (!assigner) return "";
+  const createdTime = formatCreatedTime(task.createdAt);
+  return createdTime ? `${assigner} - ${createdTime}` : assigner;
+}
+
 function encodeMap(value) {
   return encodeURIComponent(value || "");
 }
@@ -1186,7 +1200,7 @@ function TaskList({ tasks, blocks = [], db, currentUser, onStatus, onEdit, onSch
         const description = String(task.description || task.observations || "").trim();
         const title = task.title || task.description || "Tarea sin titulo";
         const isBlockTask = Boolean(task.isScheduleBlock);
-        const assigner = taskAssigner(task);
+        const assignerLabel = taskAssignerLabel(task);
         const canOperateThisTask = canChangeStatus && Number(task.driverId || currentUser?.currentDriverId) === Number(currentUser?.currentDriverId);
         const startPlace = shortAddress(task.origin);
         const endPlace = shortAddress(task.destination || stops.at(-1));
@@ -1200,7 +1214,7 @@ function TaskList({ tasks, blocks = [], db, currentUser, onStatus, onEdit, onSch
                 <span className="driverTaskTime">{task.start ? formatTime24(task.start) : "Sin horario"}</span>
                 <span className="driverTaskTitleWrap">
                   <strong className="driverTaskTitle">{title}</strong>
-                  {assigner ? <small className="taskAssigner">Asignada por {assigner}</small> : null}
+                  {assignerLabel ? <small className="taskAssigner">Asignada por {assignerLabel}</small> : null}
                 </span>
               </span>
               <span className="driverTaskHeaderMeta">
@@ -1221,7 +1235,7 @@ function TaskList({ tasks, blocks = [], db, currentUser, onStatus, onEdit, onSch
                 {task.observations ? <p><b>Observaciones:</b> {task.observations}</p> : null}
                 {task.merchandise ? <p><b>Mercaderia:</b> {task.merchandise}</p> : null}
                 {task.quantities ? <p><b>Cantidades:</b> {task.quantities}</p> : null}
-                {assigner ? <p className="taskAssigner">Asignada por {assigner}</p> : null}
+                {assignerLabel ? <p className="taskAssigner">Asignada por {assignerLabel}</p> : null}
               </section>
               {!isBlockTask ? <section className="driverTaskBlock">
                 <span className="eyebrow">FINAL</span>
@@ -1332,7 +1346,7 @@ function DailyTask({ task, db, canOperate, canChangeStatus, currentUser, onStatu
   const title = task.title || task.description || "Tarea sin titulo";
   const description = String(task.description || "").trim();
   const isBlockTask = Boolean(task.isScheduleBlock);
-  const assigner = taskAssigner(task);
+  const assignerLabel = taskAssignerLabel(task);
   const canEdit = canOperate && canEditTask(task, currentUser);
   const canOperateThisTask = canChangeStatus && Number(task.driverId || currentUser?.currentDriverId) === Number(currentUser?.currentDriverId);
   const summaryRoute = isBlockTask && task.blockEnd ? `Reservado hasta ${formatTime24(task.blockEnd)}` : [task.origin, task.destination].map(shortAddress).filter(Boolean).join(" -> ");
@@ -1344,7 +1358,7 @@ function DailyTask({ task, db, canOperate, canChangeStatus, currentUser, onStatu
     task.merchandise ? ["Mercaderia", task.merchandise] : null,
     task.quantities ? ["Cantidades", task.quantities] : null,
     (task.contact || task.phone) ? ["Contacto", [task.contact, task.phone].filter(Boolean).join(" - ")] : null,
-    assigner ? ["Asignada por", assigner] : null,
+    assignerLabel ? ["Asignada por", assignerLabel] : null,
     stops.length ? ["Paradas", stops.map(shortAddress).join(" / ")] : null,
   ].filter(Boolean);
 
@@ -1396,7 +1410,7 @@ function DailyTask({ task, db, canOperate, canChangeStatus, currentUser, onStatu
         <span className="dailyTaskMain">
           <b>{title}</b>
           {summaryRoute ? <small>{summaryRoute}</small> : null}
-          {assigner ? <small className="taskAssigner">Asignada por {assigner}</small> : null}
+          {assignerLabel ? <small className="taskAssigner">Asignada por {assignerLabel}</small> : null}
         </span>
         <span className={`status ${task.status}`}>{statusText[task.status] || task.status}</span>
       </summary>
