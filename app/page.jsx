@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useMemo, useRef, useState } from "react";
-import { Bell, CalendarDays, ChevronDown, ChevronLeft, ChevronRight, Download, Edit3, LogOut, MapPin, Menu, Plus, Route, Search, Settings, Trash2, Truck, UserPlus, Users, X } from "lucide-react";
+import { Bell, CalendarDays, ChevronDown, ChevronLeft, ChevronRight, Download, Edit3, LogOut, MapPin, Menu, Phone, Plus, Route, Search, Settings, Trash2, Truck, UserPlus, Users, X } from "lucide-react";
 
 const VAPID_PUBLIC_KEY = "BOgzmxTmjpL2edxhwwe1W0MYXq_NsI-4NiJm2uNYJdMNM9HZgFNIxP6yrGJSmtnfa-aVEmAlr6nn8Q-zbQEAm7g";
 
@@ -244,6 +244,11 @@ function taskGoogleMapsURL(task) {
   if (origin) params.set("origin", origin);
   if (waypoints.length) params.set("waypoints", waypoints.join("|"));
   return `https://www.google.com/maps/dir/?${params.toString()}`;
+}
+
+function phoneHref(value) {
+  const normalized = String(value || "").replace(/[^\d+]/g, "");
+  return normalized ? `tel:${normalized}` : "";
 }
 
 function availableVehicle(vehicles) {
@@ -1096,6 +1101,9 @@ function TaskList({ tasks, db, currentUser, onStatus, onEdit, onSchedule, canSch
         const canOperateThisTask = canChangeStatus && Number(task.driverId || currentUser?.currentDriverId) === Number(currentUser?.currentDriverId);
         const startPlace = shortAddress(task.origin);
         const endPlace = shortAddress(task.destination || stops.at(-1));
+        const driver = db.drivers.find((item) => Number(item.id) === Number(task.driverId || currentUser?.currentDriverId));
+        const driverPhone = phoneHref(driver?.phone);
+        const contactPhone = phoneHref(task.phone);
         return (
           <details className={`driverTaskCard ${task.status === "realizada" ? "completed" : ""} ${task.status === "en-trabajo" ? "active" : ""}`} key={task.id}>
             <summary className="driverTaskHeader">
@@ -1134,6 +1142,8 @@ function TaskList({ tasks, db, currentUser, onStatus, onEdit, onSchedule, canSch
               </section>
               <div className="driverTaskActions">
                 <a className="iconBtn navigationBtn" href={taskGoogleMapsURL(task)} target="_blank" rel="noreferrer" aria-label="Abrir navegacion en Google Maps" title="Abrir navegacion en Google Maps"><MapPin size={19} /></a>
+                {contactPhone ? <a className="btn" href={contactPhone}><Phone size={15} /> Llamar contacto</a> : null}
+                {driverPhone && normalizedRole(currentUser?.role) !== "chofer" ? <a className="btn" href={driverPhone}><Phone size={15} /> Llamar chofer</a> : null}
                 {task.merchandisePdf?.data ? <a className="btn" href={task.merchandisePdf.data} download={task.merchandisePdf.name}>Abrir PDF</a> : null}
                 {!task.start && canSchedule ? <TaskSchedule task={task} onSchedule={onSchedule} /> : null}
                 {canEditTask(task, currentUser) ? <button className="btn" type="button" onClick={() => onEdit(task)}><Edit3 size={15} /> Editar</button> : null}
@@ -1225,7 +1235,7 @@ function DailySchedule({ date, tasks, db, scheduleBlocks = [], canCreate, canCha
   );
 }
 
-function DailyTask({ task, canOperate, canChangeStatus, currentUser, onStatus, onEdit, onDelete, onSave, outside = false }) {
+function DailyTask({ task, db, canOperate, canChangeStatus, currentUser, onStatus, onEdit, onDelete, onSave, outside = false }) {
   const [editing, setEditing] = useState(false);
   const [saving, setSaving] = useState(false);
   const [draft, setDraft] = useState(null);
@@ -1236,6 +1246,9 @@ function DailyTask({ task, canOperate, canChangeStatus, currentUser, onStatus, o
   const canEdit = canOperate && canEditTask(task, currentUser);
   const canOperateThisTask = canChangeStatus && Number(task.driverId || currentUser?.currentDriverId) === Number(currentUser?.currentDriverId);
   const summaryRoute = [task.origin, task.destination].map(shortAddress).filter(Boolean).join(" -> ");
+  const driver = db?.drivers?.find((item) => Number(item.id) === Number(task.driverId || currentUser?.currentDriverId));
+  const driverPhone = phoneHref(driver?.phone);
+  const contactPhone = phoneHref(task.phone);
   const metaItems = [
     task.distance ? ["Distancia", `${task.distance} km`] : null,
     task.merchandise ? ["Mercaderia", task.merchandise] : null,
@@ -1333,6 +1346,8 @@ function DailyTask({ task, canOperate, canChangeStatus, currentUser, onStatus, o
           ) : (
             <>
               <a className="btn primary" href={taskGoogleMapsURL(task)} target="_blank" rel="noreferrer">Abrir en Google Maps</a>
+              {driverPhone ? <a className="btn" href={driverPhone}><Phone size={15} /> Llamar chofer</a> : null}
+              {contactPhone ? <a className="btn" href={contactPhone}><Phone size={15} /> Llamar contacto</a> : null}
               {task.merchandisePdf?.data ? <a className="btn" href={task.merchandisePdf.data} download={task.merchandisePdf.name}>Abrir PDF</a> : null}
               {canEdit ? <button className="btn" type="button" onClick={() => onEdit ? onEdit(task) : beginEditing()}><Edit3 size={15} /> Editar</button> : null}
               {canOperate ? <button className="iconBtn danger" type="button" onClick={() => onDelete(task)} aria-label="Eliminar tarea" title="Eliminar tarea"><Trash2 size={16} /></button> : null}
