@@ -422,6 +422,17 @@ function appFetch(path, options) {
   return isLocalPreview() && path.startsWith("/api/") ? localApiFetch(path, options) : fetch(path, options);
 }
 
+async function ensureServiceWorkerRegistration() {
+  if (!("serviceWorker" in navigator)) return null;
+  const current = await navigator.serviceWorker.getRegistration("/");
+  if (current) return current;
+  return navigator.serviceWorker.register("/sw.js", { scope: "/" });
+}
+
+function serializePushSubscription(subscription) {
+  return subscription?.toJSON ? subscription.toJSON() : subscription;
+}
+
 export default function Home() {
   const menuTouch = useRef({ x: 0, y: 0, tracking: false });
   const installPrompt = useRef(null);
@@ -602,10 +613,47 @@ export default function Home() {
   }, [token, user]);
 
   useEffect(() => {
-    if (!user || !("Notification" in window)) return;
-    if (Notification.permission === "granted") setPushState("enabled");
-    if (Notification.permission === "denied") setPushState("denied");
-  }, [user]);
+    if (!user || !token) return undefined;
+    let cancelled = false;
+    async function syncNotifications() {
+      if (!("Notification" in window) || !("serviceWorker" in navigator) || !("PushManager" in window)) return;
+      if (Notification.permission === "denied") {
+        if (!cancelled) setPushState("denied");
+        return;
+      }
+      if (Notification.permission !== "granted") {
+        if (!cancelled) setPushState("idle");
+        return;
+      }
+      try {
+        const registration = await ensureServiceWorkerRegistration();
+        const subscription = await registration?.pushManager.getSubscription();
+        if (!subscription) {
+          if (!cancelled) setPushState("idle");
+          return;
+        }
+        const response = await appFetch("/api/push/subscribe", {
+          method: "POST",
+          headers: apiHeaders(token, { "content-type": "application/json" }),
+          body: JSON.stringify({
+            subscription: serializePushSubscription(subscription),
+            device: {
+              standalone: window.matchMedia("(display-mode: standalone)").matches || window.navigator.standalone === true,
+              userAgent: window.navigator.userAgent,
+            },
+          }),
+        });
+        if (!response.ok) throw new Error("No se pudo sincronizar avisos");
+        if (!cancelled) setPushState("enabled");
+      } catch {
+        if (!cancelled) setPushState("idle");
+      }
+    }
+    syncNotifications();
+    return () => {
+      cancelled = true;
+    };
+  }, [token, user]);
 
   useEffect(() => {
     if (!user || canAccessView(currentRole, currentView)) return;
@@ -690,7 +738,7 @@ export default function Home() {
         notify("Permiso de notificaciones no habilitado.", "error");
         return;
       }
-      const registration = await navigator.serviceWorker.ready;
+      const registration = await ensureServiceWorkerRegistration();
       const keyResponse = await appFetch("/api/push/public-key", { headers: apiHeaders(token, { accept: "application/json" }) });
       const keyPayload = await keyResponse.json().catch(() => ({}));
       if (!keyResponse.ok || !keyPayload.publicKey) throw new Error("No se pudo preparar notificaciones");
@@ -704,7 +752,13 @@ export default function Home() {
       const response = await appFetch("/api/push/subscribe", {
         method: "POST",
         headers: apiHeaders(token, { "content-type": "application/json" }),
-        body: JSON.stringify({ subscription }),
+        body: JSON.stringify({
+          subscription: serializePushSubscription(subscription),
+          device: {
+            standalone: window.matchMedia("(display-mode: standalone)").matches || window.navigator.standalone === true,
+            userAgent: window.navigator.userAgent,
+          },
+        }),
       });
       const payload = await response.json().catch(() => ({}));
       if (!response.ok) throw new Error(payload.error || "No se pudo activar avisos");

@@ -429,6 +429,7 @@ async function savePushSubscription(request, env) {
   if (!user) return Response.json({ error: "Se requiere inicio de sesion" }, { status: 401 });
   const payload = await request.json();
   const subscription = payload?.subscription;
+  const device = payload?.device && typeof payload.device === "object" ? payload.device : {};
   if (!subscription?.endpoint || !subscription?.keys?.p256dh || !subscription?.keys?.auth) {
     return Response.json({ error: "Suscripcion invalida" }, { status: 400 });
   }
@@ -441,6 +442,7 @@ async function savePushSubscription(request, env) {
     role: normalizedRole(user.role),
     currentDriverId: user.currentDriverId || null,
     subscription,
+    device,
     updatedAt: new Date().toISOString(),
   });
   await writeSettingKey(env, "push_subscriptions", next.slice(-250), user);
