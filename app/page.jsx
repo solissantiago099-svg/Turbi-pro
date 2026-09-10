@@ -1514,9 +1514,12 @@ function taskToForm(task, prefill, currentDriverId, db) {
 }
 
 function NewTaskForm({ db, prefill, initialTask = null, currentDriverId, canAssignSchedule, canManageBlocks = false, scheduleBlocks = [], onScheduleBlocks, onCancel, onCreate, onError }) {
+  const draftIdRef = useRef(Date.now());
+  const savingRef = useRef(false);
   const [form, setForm] = useState(() => taskToForm(initialTask, prefill, currentDriverId, db));
   const [routeInfo, setRouteInfo] = useState({ status: "Google Maps usara tu ubicacion actual para iniciar el recorrido.", distance: "", coordinates: [] });
   const [calculating, setCalculating] = useState(false);
+  const [saving, setSaving] = useState(false);
   const [pdf, setPdf] = useState(null);
   const isEditing = Boolean(initialTask);
   const canSetSchedule = canAssignSchedule;
@@ -1528,6 +1531,9 @@ function NewTaskForm({ db, prefill, initialTask = null, currentDriverId, canAssi
   ].join("|");
 
   useEffect(() => {
+    if (!initialTask) draftIdRef.current = Date.now();
+    savingRef.current = false;
+    setSaving(false);
     setForm(taskToForm(initialTask, prefill, currentDriverId, db));
     setPdf(null);
     setRouteInfo({
@@ -1616,6 +1622,7 @@ function NewTaskForm({ db, prefill, initialTask = null, currentDriverId, canAssi
 
   async function submit(event) {
     event.preventDefault();
+    if (savingRef.current) return;
     if (selectedScheduleBlock) return;
     const scheduleMode = canSetSchedule ? form.scheduleMode : scheduleModeForTask(initialTask);
     const isBlock = scheduleMode === "block";
@@ -1623,51 +1630,58 @@ function NewTaskForm({ db, prefill, initialTask = null, currentDriverId, canAssi
       onError("Para bloquear, la hora de fin debe ser posterior al inicio.");
       return;
     }
-    let merchandisePdf = initialTask?.merchandisePdf || null;
-    if (pdf) {
-      if (pdf.type !== "application/pdf") {
-        onError("El adjunto debe ser un archivo PDF.");
-        return;
+    savingRef.current = true;
+    setSaving(true);
+    try {
+      let merchandisePdf = initialTask?.merchandisePdf || null;
+      if (pdf) {
+        if (pdf.type !== "application/pdf") {
+          onError("El adjunto debe ser un archivo PDF.");
+          return;
+        }
+        if (pdf.size > 1500000) {
+          onError("El PDF supera el maximo de 1,5 MB.");
+          return;
+        }
+        merchandisePdf = { name: pdf.name, size: pdf.size, data: await fileToDataURL(pdf) };
       }
-      if (pdf.size > 1500000) {
-        onError("El PDF supera el maximo de 1,5 MB.");
-        return;
-      }
-      merchandisePdf = { name: pdf.name, size: pdf.size, data: await fileToDataURL(pdf) };
+      const taskId = initialTask?.id || draftIdRef.current;
+      const blockDuration = isBlock ? Math.max(1, timeToMinutes(form.blockEnd) - timeToMinutes(form.start)) : 0;
+      await onCreate({
+        ...initialTask,
+        id: taskId,
+        title: form.title,
+        description: form.title,
+        merchandise: form.merchandise,
+        quantities: form.quantities,
+        merchandisePdf,
+        observations: form.observations,
+        date: canSetSchedule ? (form.date || localISO()) : (initialTask?.date || form.date || localISO()),
+        start: canSetSchedule && scheduleMode !== "unscheduled" ? form.start : (initialTask?.start || ""),
+        assigned: blockDuration,
+        duration: blockDuration,
+        scheduleMode,
+        isScheduleBlock: isBlock,
+        scheduleBlockId: isBlock ? scheduleBlockIdForTask({ ...initialTask, id: taskId }) : "",
+        blockEnd: isBlock ? form.blockEnd : "",
+        origin: form.origin,
+        destination: form.destination,
+        stops: form.stops.map((value) => value.trim()).filter(Boolean),
+        contact: form.contact,
+        phone: form.phone,
+        assignedBy: form.assignedBy,
+        driverId: Number(form.driverId),
+        vehicleId: Number(form.vehicleId),
+        distance: Number(routeInfo.distance || 0),
+        routeCoordinates: routeInfo.coordinates,
+        status: initialTask?.status || "pendiente",
+        createdAt: initialTask?.createdAt || new Date().toISOString(),
+        updatedAt: isEditing ? new Date().toISOString() : initialTask?.updatedAt,
+      });
+    } finally {
+      savingRef.current = false;
+      setSaving(false);
     }
-    const taskId = initialTask?.id || Date.now();
-    const blockDuration = isBlock ? Math.max(1, timeToMinutes(form.blockEnd) - timeToMinutes(form.start)) : 0;
-    await onCreate({
-      ...initialTask,
-      id: taskId,
-      title: form.title,
-      description: form.title,
-      merchandise: form.merchandise,
-      quantities: form.quantities,
-      merchandisePdf,
-      observations: form.observations,
-      date: canSetSchedule ? (form.date || localISO()) : (initialTask?.date || form.date || localISO()),
-      start: canSetSchedule && scheduleMode !== "unscheduled" ? form.start : (initialTask?.start || ""),
-      assigned: blockDuration,
-      duration: blockDuration,
-      scheduleMode,
-      isScheduleBlock: isBlock,
-      scheduleBlockId: isBlock ? scheduleBlockIdForTask({ ...initialTask, id: taskId }) : "",
-      blockEnd: isBlock ? form.blockEnd : "",
-      origin: form.origin,
-      destination: form.destination,
-      stops: form.stops.map((value) => value.trim()).filter(Boolean),
-      contact: form.contact,
-      phone: form.phone,
-      assignedBy: form.assignedBy,
-      driverId: Number(form.driverId),
-      vehicleId: Number(form.vehicleId),
-      distance: Number(routeInfo.distance || 0),
-      routeCoordinates: routeInfo.coordinates,
-      status: initialTask?.status || "pendiente",
-      createdAt: initialTask?.createdAt || new Date().toISOString(),
-      updatedAt: isEditing ? new Date().toISOString() : initialTask?.updatedAt,
-    });
   }
 
   const previewDestination = [form.origin, form.destination, ...form.stops].filter(Boolean).join(" -> ") || "Sin recorrido";
@@ -1759,7 +1773,7 @@ function NewTaskForm({ db, prefill, initialTask = null, currentDriverId, canAssi
 
         <div className="actions">
           <button className="btn" type="button" onClick={onCancel}>Cancelar</button>
-          <button className="btn primary" disabled={calculating || Boolean(selectedScheduleBlock)}>{isEditing ? "Guardar cambios" : form.scheduleMode === "block" ? "Guardar bloqueo y asignar" : "Guardar y asignar tarea"}</button>
+          <button className="btn primary" disabled={calculating || saving || Boolean(selectedScheduleBlock)}>{saving ? "Guardando..." : isEditing ? "Guardar cambios" : form.scheduleMode === "block" ? "Guardar bloqueo y asignar" : "Guardar y asignar tarea"}</button>
         </div>
         {selectedScheduleBlock ? (
           <div className="routeNotice scheduleBlockError">
