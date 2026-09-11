@@ -398,6 +398,7 @@ async function localApiFetch(path, options = {}) {
   }
   if (path === "/api/push/public-key" && method === "GET") return localResponse({ publicKey: VAPID_PUBLIC_KEY, supported: true });
   if (path === "/api/push/subscribe" && method === "POST") return localResponse({ ok: true });
+  if (path === "/api/push/test" && method === "POST") return localResponse({ total: 1, sent: 1, removed: 0 });
   if (path === "/api/login" && method === "POST") {
     const credentials = JSON.parse(options.body || "{}");
     const found = savedUsers.find((item) => item.username === String(credentials.username || "").toLowerCase() && item.password === credentials.password);
@@ -1051,6 +1052,32 @@ export default function Home() {
     await savePartial("/api/legal-entities", "PUT", { entities: nextEntities }, nextDb, "Documentacion recurrente actualizada");
   }
 
+  async function sendTestNotification() {
+    if (!token) return;
+    setPushState("saving");
+    try {
+      if (isLocalMode()) {
+        if (Notification.permission === "granted") {
+          new Notification("Notificacion de prueba", { body: "Si ves esto, los avisos de TAMIZ RUTAS estan funcionando.", icon: "/icons/icon-192.png" });
+        }
+        setPushState("enabled");
+        notify("Notificacion de prueba enviada");
+        return;
+      }
+      const response = await appFetch("/api/push/test", {
+        method: "POST",
+        headers: apiHeaders(token, { "content-type": "application/json" }),
+      });
+      const payload = await response.json().catch(() => ({}));
+      if (!response.ok) throw new Error(payload.error || "No se pudo enviar la prueba");
+      setPushState("enabled");
+      notify(payload.sent ? `Prueba enviada a ${payload.sent} dispositivo${payload.sent === 1 ? "" : "s"}` : "No hay dispositivos con avisos activos", payload.sent ? "success" : "error");
+    } catch (error) {
+      setPushState("enabled");
+      notify(error.message || "No se pudo enviar la prueba", "error");
+    }
+  }
+
   async function saveProfile(payload) {
     const response = await appFetch("/api/me", {
       method: "PUT",
@@ -1155,6 +1182,10 @@ export default function Home() {
             {pushState !== "enabled" && pushState !== "denied" ? (
               <button className="btn notificationButton" type="button" onClick={enableNotifications} disabled={pushState === "saving"}>
                 <Bell size={16} /> {pushState === "saving" ? "Activando..." : "Activar avisos"}
+              </button>
+            ) : pushState === "enabled" ? (
+              <button className="btn notificationButton" type="button" onClick={sendTestNotification} disabled={pushState === "saving"}>
+                <Bell size={16} /> {pushState === "saving" ? "Enviando..." : "Probar aviso"}
               </button>
             ) : null}
             <button className="btn" onClick={logout}>

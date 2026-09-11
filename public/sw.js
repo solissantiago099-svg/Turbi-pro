@@ -1,4 +1,4 @@
-const CACHE_NAME = "tamiz-rutas-shell-v5";
+const CACHE_NAME = "tamiz-rutas-shell-v6";
 const APP_SHELL = ["/", "/manifest.webmanifest", "/icons/icon-192.png", "/icons/icon-512.png", "/apple-touch-icon.png"];
 
 self.addEventListener("install", (event) => {
@@ -41,6 +41,7 @@ self.addEventListener("push", (event) => {
     icon: "/icons/icon-192.png",
     badge: "/icons/icon-192.png",
     tag: payload.tag || "tamiz-task",
+    renotify: true,
     data: { url: payload.url || "/" },
   };
   event.waitUntil(self.registration.showNotification(title, options));

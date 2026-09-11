@@ -451,6 +451,43 @@ function base64UrlText(value) {
   return base64UrlBytes(new TextEncoder().encode(value));
 }
 
+function base64UrlToBytes(value) {
+  const normalized = String(value || "").replace(/-/g, "+").replace(/_/g, "/");
+  const padded = normalized + "=".repeat((4 - (normalized.length % 4)) % 4);
+  const binary = atob(padded);
+  const bytes = new Uint8Array(binary.length);
+  for (let index = 0; index < binary.length; index += 1) bytes[index] = binary.charCodeAt(index);
+  return bytes;
+}
+
+function concatBytes(...parts) {
+  const length = parts.reduce((total, part) => total + part.length, 0);
+  const output = new Uint8Array(length);
+  let offset = 0;
+  for (const part of parts) {
+    output.set(part, offset);
+    offset += part.length;
+  }
+  return output;
+}
+
+async function hmacSha256(keyBytes, dataBytes) {
+  const key = await crypto.subtle.importKey("raw", keyBytes, { name: "HMAC", hash: "SHA-256" }, false, ["sign"]);
+  return new Uint8Array(await crypto.subtle.sign("HMAC", key, dataBytes));
+}
+
+async function hkdfExpand(prk, info, length) {
+  const chunks = [];
+  let previous = new Uint8Array(0);
+  let outputLength = 0;
+  for (let counter = 1; outputLength < length; counter += 1) {
+    previous = await hmacSha256(prk, concatBytes(previous, info, new Uint8Array([counter])));
+    chunks.push(previous);
+    outputLength += previous.length;
+  }
+  return concatBytes(...chunks).slice(0, length);
+}
+
 async function vapidToken(env, audience) {
   if (!env.TAMIZ_VAPID_PRIVATE_JWK) return "";
   const jwk = JSON.parse(env.TAMIZ_VAPID_PRIVATE_JWK);
@@ -496,33 +533,85 @@ function taskNotificationTargets(subscriptions, task) {
   return subscriptions.filter((item) => item?.subscription?.endpoint);
 }
 
-async function sendPush(subscription, env) {
+async function encryptedPushBody(subscription, payload) {
+  const userPublicKey = base64UrlToBytes(subscription.keys.p256dh);
+  const authSecret = base64UrlToBytes(subscription.keys.auth);
+  const serverKeys = await crypto.subtle.generateKey({ name: "ECDH", namedCurve: "P-256" }, true, ["deriveBits"]);
+  const serverPublicKey = new Uint8Array(await crypto.subtle.exportKey("raw", serverKeys.publicKey));
+  const importedUserKey = await crypto.subtle.importKey("raw", userPublicKey, { name: "ECDH", namedCurve: "P-256" }, false, []);
+  const sharedSecret = new Uint8Array(await crypto.subtle.deriveBits({ name: "ECDH", public: importedUserKey }, serverKeys.privateKey, 256));
+  const prkKey = await hmacSha256(authSecret, sharedSecret);
+  const keyInfo = concatBytes(new TextEncoder().encode("WebPush: info"), new Uint8Array([0]), userPublicKey, serverPublicKey);
+  const ikm = await hkdfExpand(prkKey, keyInfo, 32);
+  const salt = crypto.getRandomValues(new Uint8Array(16));
+  const prk = await hmacSha256(salt, ikm);
+  const contentEncryptionKey = await hkdfExpand(prk, new TextEncoder().encode("Content-Encoding: aes128gcm\\0"), 16);
+  const nonce = await hkdfExpand(prk, new TextEncoder().encode("Content-Encoding: nonce\\0"), 12);
+  const cryptoKey = await crypto.subtle.importKey("raw", contentEncryptionKey, "AES-GCM", false, ["encrypt"]);
+  const plaintext = concatBytes(new TextEncoder().encode(JSON.stringify(payload)), new Uint8Array([2]));
+  const ciphertext = new Uint8Array(await crypto.subtle.encrypt({ name: "AES-GCM", iv: nonce, tagLength: 128 }, cryptoKey, plaintext));
+  const recordSize = new Uint8Array([0, 0, 16, 0]);
+  return concatBytes(salt, recordSize, new Uint8Array([serverPublicKey.length]), serverPublicKey, ciphertext);
+}
+
+async function sendPush(subscription, env, payload) {
   const endpoint = subscription?.endpoint || "";
   if (!endpoint) return { ok: false };
   const audience = new URL(endpoint).origin;
   const token = await vapidToken(env, audience);
   if (!token) return { ok: false };
+  const body = await encryptedPushBody(subscription, payload);
   const response = await fetch(endpoint, {
     method: "POST",
     headers: {
       TTL: "86400",
-      Urgency: "normal",
+      Urgency: "high",
+      "Content-Encoding": "aes128gcm",
+      "Content-Type": "application/octet-stream",
       Authorization: "vapid t=" + token + ", k=" + VAPID_PUBLIC_KEY,
     },
+    body,
   });
   return { ok: response.ok, gone: response.status === 404 || response.status === 410 };
 }
 
-async function notifyTaskAssignment(env, task, user) {
+async function sendPushToTargets(env, targets, payload, user) {
   if (!env.TAMIZ_VAPID_PRIVATE_JWK) return;
-  const subscriptions = await readPushSubscriptions(env);
-  const targets = taskNotificationTargets(subscriptions, task);
   if (!targets.length) return;
-  const results = await Promise.allSettled(targets.map((item) => sendPush(item.subscription, env)));
+  const results = await Promise.allSettled(targets.map((item) => sendPush(item.subscription, env, payload)));
   const goneEndpoints = new Set(results.map((result, index) => result.status === "fulfilled" && result.value.gone ? targets[index].subscription.endpoint : null).filter(Boolean));
   if (goneEndpoints.size) {
+    const subscriptions = await readPushSubscriptions(env);
     await writeSettingKey(env, "push_subscriptions", subscriptions.filter((item) => !goneEndpoints.has(item.subscription?.endpoint)), user);
   }
+  return { total: targets.length, sent: results.filter((result) => result.status === "fulfilled" && result.value.ok).length, removed: goneEndpoints.size };
+}
+
+async function notifyTaskAssignment(env, task, user) {
+  const subscriptions = await readPushSubscriptions(env);
+  const targets = taskNotificationTargets(subscriptions, task);
+  return sendPushToTargets(env, targets, {
+    title: "Nueva tarea asignada",
+    body: (task.start ? formatTime24(task.start) + " - " : "") + (task.title || "Abrí TAMIZ RUTAS para ver el detalle."),
+    tag: "tamiz-task-" + String(task.id || Date.now()),
+    url: "/",
+  }, user);
+}
+
+async function testPushNotification(request, env) {
+  const user = await currentUser(request, env);
+  if (!user) return Response.json({ error: "Se requiere inicio de sesion" }, { status: 401 });
+  if (!env.TAMIZ_VAPID_PRIVATE_JWK) return Response.json({ error: "Avisos no configurados en servidor" }, { status: 503 });
+  const subscriptions = await readPushSubscriptions(env);
+  const targets = subscriptions.filter((item) => item?.subscription?.endpoint);
+  const result = await sendPushToTargets(env, targets, {
+    title: "Notificacion de prueba",
+    body: "Si ves esto, los avisos de TAMIZ RUTAS estan funcionando.",
+    tag: "tamiz-test-" + Date.now(),
+    url: "/",
+  }, user);
+  await audit(env, user, "test-push", "push", "all", result || { total: 0, sent: 0, removed: 0 });
+  return Response.json(result || { total: 0, sent: 0, removed: 0 }, { headers: { "cache-control": "no-store" } });
 }
 
 async function revisionInfo(env) {
@@ -834,6 +923,7 @@ export default {
     if (url.pathname === "/api/state" && request.method === "PUT") return writeState(request, env);
     if (url.pathname === "/api/push/public-key" && request.method === "GET") return pushPublicKey();
     if (url.pathname === "/api/push/subscribe" && request.method === "POST") return savePushSubscription(request, env);
+    if (url.pathname === "/api/push/test" && request.method === "POST") return testPushNotification(request, env);
     if (url.pathname === "/api/tasks" && request.method === "POST") return saveTask(request, env, "create", ctx);
     if (url.pathname === "/api/tasks" && request.method === "PUT") return saveTask(request, env, "edit", ctx);
     if (url.pathname === "/api/tasks" && request.method === "DELETE") return deleteTaskRecord(request, env);
