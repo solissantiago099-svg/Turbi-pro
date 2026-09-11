@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useMemo, useRef, useState } from "react";
-import { Bell, CalendarDays, ChevronDown, ChevronLeft, ChevronRight, Download, Edit3, FileText, IdCard, LogOut, MapPin, Menu, Phone, Plus, Route, Search, Settings, Trash2, Truck, UserCircle, UserPlus, Users, X } from "lucide-react";
+import { Bell, CalendarDays, ChevronDown, ChevronLeft, ChevronRight, Download, Edit3, FileText, LogOut, MapPin, Menu, Phone, Plus, Route, Search, Settings, Trash2, UserCircle, UserPlus, Users, X } from "lucide-react";
 
 const VAPID_PUBLIC_KEY = "BOgzmxTmjpL2edxhwwe1W0MYXq_NsI-4NiJm2uNYJdMNM9HZgFNIxP6yrGJSmtnfa-aVEmAlr6nn8Q-zbQEAm7g";
 
@@ -9,9 +9,8 @@ const views = [
   { id: "agenda", label: "Agenda", subtitle: "Planificacion diaria", icon: CalendarDays, roles: ["admin", "usuario"] },
   { id: "ruta", label: "Mi ruta", subtitle: "Trabajo del chofer", icon: Route, roles: ["admin", "chofer"] },
   { id: "nueva", label: "Nueva tarea", subtitle: "Carga rapida", icon: Plus, roles: ["admin", "usuario"] },
-  { id: "documentos", label: "Documentos", subtitle: "Razones sociales", icon: FileText, roles: ["admin", "usuario", "chofer"] },
+  { id: "utilidades", label: "Utilidades", subtitle: "Documentacion", icon: FileText, roles: ["admin", "chofer"] },
   { id: "contactos", label: "Contactos", subtitle: "Equipo operativo", icon: Phone, roles: ["chofer"] },
-  { id: "vehiculos", label: "Vehiculos", subtitle: "Flota y documentacion", icon: Truck, roles: ["admin"] },
   { id: "choferes", label: "Choferes", subtitle: "Equipo activo", icon: Users, roles: ["admin"] },
   { id: "perfil", label: "Mi perfil", subtitle: "Datos personales", icon: UserCircle, roles: ["admin", "usuario", "chofer"] },
   { id: "configuracion", label: "Configuracion", subtitle: "Usuarios y respaldo", icon: Settings, roles: ["admin"] },
@@ -505,6 +504,7 @@ export default function Home() {
 
   const currentRole = normalizedRole(user?.role);
   const visibleViews = useMemo(() => views.filter((item) => canAccessView(currentRole, item)), [currentRole]);
+  const selectedView = views.find((item) => item.id === view);
   const currentView = visibleViews.find((item) => item.id === view) || visibleViews[0] || views[0];
   const isAdmin = currentRole === "admin";
   const canManageTasks = ["admin", "usuario"].includes(currentRole);
@@ -705,10 +705,10 @@ export default function Home() {
   }, [token, user]);
 
   useEffect(() => {
-    if (!user || canAccessView(currentRole, currentView)) return;
+    if (!user || (selectedView && canAccessView(currentRole, selectedView))) return;
     const fallback = visibleViews[0]?.id || (currentRole === "chofer" ? "ruta" : "agenda");
     setView(fallback);
-  }, [currentRole, currentView, user, visibleViews]);
+  }, [currentRole, selectedView, user, visibleViews]);
 
   useEffect(() => {
     if (!menuOpen) return undefined;
@@ -1271,9 +1271,8 @@ export default function Home() {
             />
           )}
 
-          {view === "documentos" && <DocumentsPanel entities={db.settings?.legalEntities} canEdit={isAdmin} onSave={saveLegalEntities} />}
+          {view === "utilidades" && <UtilitiesPanel vehicles={db.vehicles} entities={db.settings?.legalEntities} canEdit={isAdmin} onSaveVehicle={saveVehicle} onSaveLegalEntities={saveLegalEntities} />}
           {view === "contactos" && <ContactsPanel users={users} currentUser={user} />}
-          {view === "vehiculos" && <Records items={db.vehicles} type="vehicle" onSave={saveVehicle} />}
           {view === "choferes" && <Records items={db.drivers} type="driver" users={users} onSave={saveDriver} />}
           {view === "perfil" && <ProfilePanel user={user} currentDriver={currentDriver} onSave={saveProfile} />}
           {view === "configuracion" && <SettingsPanel user={user} users={users} db={db} token={token} revision={revision} onUsers={setUsers} onUser={setUser} onNotify={notify} />}
@@ -2129,24 +2128,50 @@ function VehicleDetailsCard({ item, onEdit }) {
             </div>
           ))}
         </div>
-        <div className="actions">
-          <button className="btn" type="button" onClick={onEdit}><Edit3 size={15} /> Editar vehiculo</button>
-        </div>
+        {onEdit ? (
+          <div className="actions">
+            <button className="btn" type="button" onClick={onEdit}><Edit3 size={15} /> Editar vehiculo</button>
+          </div>
+        ) : null}
       </div>
     </details>
   );
 }
 
-function DocumentsPanel({ entities, canEdit, onSave }) {
+function UtilitiesPanel({ vehicles = [], entities, canEdit, onSaveVehicle, onSaveLegalEntities }) {
+  const [editingVehicle, setEditingVehicle] = useState(null);
   return (
     <>
       <div className="toolbar">
         <div>
-          <span className="eyebrow">DOCUMENTOS</span>
-          <h2>Razones sociales</h2>
+          <span className="eyebrow">UTILIDADES</span>
+          <h2>Documentacion</h2>
         </div>
       </div>
-      <LegalEntitiesPanel entities={entities} canEdit={canEdit} onSave={onSave} />
+      {editingVehicle ? (
+        <VehicleForm
+          vehicle={editingVehicle}
+          onCancel={() => setEditingVehicle(null)}
+          onSave={async (vehicle) => {
+            await onSaveVehicle(vehicle);
+            setEditingVehicle(null);
+          }}
+        />
+      ) : null}
+      <section className="utilitySections">
+        <div className="utilityBlock">
+          <span className="eyebrow">CAMIONETA</span>
+          <section className="grid">
+            {vehicles.map((vehicle) => (
+              <VehicleDetailsCard item={vehicle} key={vehicle.id} onEdit={canEdit ? () => setEditingVehicle(vehicle) : null} />
+            ))}
+          </section>
+        </div>
+        <div className="utilityBlock">
+          <span className="eyebrow">RAZONES SOCIALES</span>
+          <LegalEntitiesPanel entities={entities} canEdit={canEdit} onSave={onSaveLegalEntities} />
+        </div>
+      </section>
     </>
   );
 }
@@ -2189,25 +2214,22 @@ function LegalEntitiesPanel({ entities, canEdit = false, onSave }) {
   }
 
   return (
-    <form className="card legalEntitiesCard" onSubmit={submit}>
-      <div className="formTitle legalEntitiesTitle">
-        <div>
-          <span className="eyebrow">DOCUMENTACION RECURRENTE</span>
-          <h2>Constancias por razon social</h2>
-          <p>AFIP, IIBB y datos fiscales para tener siempre a mano.</p>
-        </div>
-        {canEdit ? <button className="btn primary" disabled={saving}>{saving ? "Guardando..." : "Guardar documentacion"}</button> : null}
-      </div>
+    <form className="legalEntitiesCard" onSubmit={submit}>
       <div className="legalEntitiesGrid">
-        {form.map((entity, index) => (
+        {form.map((entity, index) => {
+          const documentCount = ["afip", "iibb"].filter((key) => entity[key]?.data).length;
+          return (
           <details className="card recordDisclosure legalEntityCard" key={entity.id || index}>
             <summary className="recordDisclosureSummary legalEntityHeading">
-              <span className="legalEntityNumber"><IdCard size={15} /></span>
-              <span className="legalEntitySummaryText">
-                <strong>{entity.name || `Razon social ${index + 1}`}</strong>
-                <small>{entity.cuit || "CUIT sin cargar"}{entity.email ? ` - ${entity.email}` : ""}</small>
-              </span>
-              <ChevronDown className="recordDisclosureChevron" size={19} aria-hidden="true" />
+              <div>
+                <h3>{entity.name || `Razon social ${index + 1}`}</h3>
+                <p>{entity.cuit || "CUIT sin cargar"}{entity.email ? ` - ${entity.email}` : ""}</p>
+                <small>{documentCount || 0} documentos legales</small>
+              </div>
+              <div className="recordActions">
+                <span className="status">legal</span>
+                <ChevronDown className="recordDisclosureChevron" size={19} aria-hidden="true" />
+              </div>
             </summary>
             <div className="recordDisclosureBody legalEntityBody">
               <div className="legalEntityFields">
@@ -2243,7 +2265,8 @@ function LegalEntitiesPanel({ entities, canEdit = false, onSave }) {
               {entity.email ? <a className="legalEntityEmail" href={`mailto:${entity.email}`}>Escribir a {entity.email}</a> : null}
             </div>
           </details>
-        ))}
+          );
+        })}
       </div>
       <div className="actions legalEntitiesActions">
         {canEdit ? <button className="btn primary" disabled={saving}>{saving ? "Guardando..." : "Guardar documentacion"}</button> : null}

@@ -1561,19 +1561,24 @@ textarea {
 }
 
 .legalEntitiesCard {
-  margin-bottom: 18px;
+  display: grid;
+  gap: 12px;
 }
 
-.legalEntitiesTitle p {
-  margin: 6px 0 0;
-  color: var(--muted);
+.utilitySections {
+  display: grid;
+  gap: 20px;
+}
+
+.utilityBlock {
+  display: grid;
+  gap: 10px;
 }
 
 .legalEntitiesGrid {
   display: grid;
   grid-template-columns: repeat(2, minmax(0, 1fr));
   gap: 12px;
-  margin-top: 16px;
 }
 
 .legalEntityCard {
@@ -1623,8 +1628,6 @@ textarea {
 .legalEntityBody {
   display: grid;
   gap: 12px;
-  border-top: 1px solid var(--line);
-  padding-top: 12px;
 }
 
 .legalEntityFields > div {
@@ -1741,7 +1744,9 @@ textarea {
 }
 
 .legalEntitiesActions {
-  display: none;
+  display: flex;
+  justify-content: flex-end;
+  margin-top: 0;
 }
 
 .legalEntitiesActions:empty {
