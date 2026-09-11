@@ -657,17 +657,27 @@ async function listPushDevices(request, env) {
   if (!user) return Response.json({ error: "Se requiere inicio de sesion" }, { status: 401 });
   if (!isAdmin(user)) return Response.json({ error: "No autorizado" }, { status: 403 });
   const subscriptions = await readPushSubscriptions(env);
-  return Response.json({ devices: pushDevicesResponse(subscriptions) }, { headers: { "cache-control": "no-store" } });
+  const lastTaskNotification = await readSettingKey(env, "last_task_push", null);
+  return Response.json({ devices: pushDevicesResponse(subscriptions), lastTaskNotification }, { headers: { "cache-control": "no-store" } });
 }
 
 async function notifyTaskAssignment(env, task, user) {
   const subscriptions = await readPushSubscriptions(env);
   const targets = taskNotificationTargets(subscriptions, task);
+  const sentAt = new Date().toISOString();
   const result = await sendPushToTargets(env, targets, {
     title: "Nueva tarea asignada",
     body: (task.start ? formatTime24(task.start) + " - " : "") + (task.title || "Abrí TAMIZ RUTAS para ver el detalle."),
-    tag: "tamiz-task-" + String(task.id || Date.now()),
+    tag: "tamiz-task-" + String(task.id || Date.now()) + "-" + Date.now(),
     url: "/",
+  }, user);
+  await writeSettingKey(env, "last_task_push", {
+    at: sentAt,
+    taskId: task.id || null,
+    title: task.title || "",
+    total: result?.total || 0,
+    sent: result?.sent || 0,
+    removed: result?.removed || 0,
   }, user);
   await audit(env, user, "notify-task", "task", String(task.id || ""), result || { total: 0, sent: 0, removed: 0 });
   return result;

@@ -2627,6 +2627,7 @@ function ProfilePanel({ user, currentDriver, onSave }) {
 function SettingsPanel({ user, users, db, token, revision, onUsers, onUser, onNotify, onTestPush }) {
   const [editingUser, setEditingUser] = useState(null);
   const [pushDevices, setPushDevices] = useState([]);
+  const [lastTaskNotification, setLastTaskNotification] = useState(null);
   const [loadingPushDevices, setLoadingPushDevices] = useState(false);
 
   async function saveUser(payload) {
@@ -2653,6 +2654,7 @@ function SettingsPanel({ user, users, db, token, revision, onUsers, onUser, onNo
       const result = await response.json().catch(() => ({}));
       if (!response.ok) throw new Error(result.error || "No se pudo leer el diagnostico");
       setPushDevices(result.devices || []);
+      setLastTaskNotification(result.lastTaskNotification || null);
     } catch (error) {
       onNotify(error.message || "No se pudo leer el diagnostico", "error");
     } finally {
@@ -2718,6 +2720,9 @@ function SettingsPanel({ user, users, db, token, revision, onUsers, onUser, onNo
                 </div>
               ))}
             </div>
+          ) : null}
+          {lastTaskNotification ? (
+            <p className="muted smallText">Ultima tarea: {lastTaskNotification.sent || 0}/{lastTaskNotification.total || 0} avisos enviados{lastTaskNotification.title ? ` - ${lastTaskNotification.title}` : ""}</p>
           ) : null}
         </article>
         {users.map((item) => (
