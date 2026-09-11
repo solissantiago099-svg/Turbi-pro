@@ -35,6 +35,14 @@ function timeToMinutes(value) {
   return Number(hours) * 60 + Number(minutes);
 }
 
+function isPastScheduledTime(date, start, now = new Date()) {
+  if (!date || !start) return false;
+  const today = localISO(now);
+  if (date < today) return true;
+  if (date > today) return false;
+  return timeToMinutes(start) < now.getHours() * 60 + now.getMinutes();
+}
+
 function minutesToTime(total) {
   const bounded = Math.max(0, Math.min(total, 23 * 60 + 59));
   return `${String(Math.floor(bounded / 60)).padStart(2, "0")}:${String(bounded % 60).padStart(2, "0")}`;
@@ -834,6 +842,10 @@ export default function Home() {
     const ownBlockId = scheduleBlockIdForTask(nextTask);
     const validationBlocks = ownBlockId ? scheduleBlocks.filter((block) => String(block.id) !== String(ownBlockId)) : scheduleBlocks;
     const blocked = scheduleChanged ? findScheduleBlock(nextTask, validationBlocks) : null;
+    if (scheduleChanged && isPastScheduledTime(nextTask.date, nextTask.start)) {
+      notify("No se puede asignar una tarea en un horario que ya paso.", "error");
+      return;
+    }
     if (blocked) {
       notify(`Ese horario esta bloqueado: ${blocked.title || "Bloqueo operativo"} (${blockTimeLabel(blocked)}).`, "error");
       return;
@@ -913,6 +925,10 @@ export default function Home() {
     if (!["admin", "usuario", "chofer"].includes(currentRole)) throw new Error("Solo el chofer o supervisor puede asignar horario.");
     if (currentRole === "chofer" && Number(task.driverId || user.currentDriverId) !== Number(user.currentDriverId)) throw new Error("Esta tarea no esta asignada a este chofer.");
     const scheduledTask = { ...task, date: date || task.date || localISO(), start, updatedAt: new Date().toISOString() };
+    if (isPastScheduledTime(scheduledTask.date, scheduledTask.start)) {
+      notify("No se puede asignar una tarea en un horario que ya paso.", "error");
+      return false;
+    }
     const blocked = findScheduleBlock(scheduledTask, scheduleBlocks);
     if (blocked) {
       notify(`Ese horario esta bloqueado: ${blocked.title || "Bloqueo operativo"} (${blockTimeLabel(blocked)}).`, "error");
@@ -925,6 +941,10 @@ export default function Home() {
   }
 
   async function deleteTask(task) {
+    if (!canEditTask(task, user)) {
+      notify("Solo puede eliminar la tarea el usuario que la asigno o un admin.", "error");
+      return;
+    }
     const label = task.title || task.description || "esta tarea";
     if (!window.confirm(`¿Eliminar ${label}? Esta accion no se puede deshacer.`)) return;
     const blockId = scheduleBlockIdForTask(task);
@@ -1525,7 +1545,7 @@ function DailyTask({ task, db, canOperate, canChangeStatus, currentUser, onStatu
               {contactPhone ? <a className="btn" href={contactPhone}><Phone size={15} /> Llamar contacto</a> : null}
               {task.merchandisePdf?.data ? <a className="btn" href={task.merchandisePdf.data} download={task.merchandisePdf.name}>Abrir PDF</a> : null}
               {canEdit ? <button className="btn" type="button" onClick={() => onEdit ? onEdit(task) : beginEditing()}><Edit3 size={15} /> Editar</button> : null}
-              {canOperate ? <button className="iconBtn danger" type="button" onClick={() => onDelete(task)} aria-label="Eliminar tarea" title="Eliminar tarea"><Trash2 size={16} /></button> : null}
+              {canEdit ? <button className="iconBtn danger" type="button" onClick={() => onDelete(task)} aria-label="Eliminar tarea" title="Eliminar tarea"><Trash2 size={16} /></button> : null}
               {canOperateThisTask && task.status !== "realizada" && task.status !== "en-trabajo" ? <button className="btn" onClick={() => onStatus(task, "en-trabajo")}>Iniciar</button> : null}
               {canOperateThisTask && task.status !== "realizada" ? <button className="btn primary" onClick={() => onStatus(task, "realizada")}>Finalizar</button> : null}
             </>
@@ -1682,6 +1702,10 @@ function NewTaskForm({ db, prefill, initialTask = null, currentDriverId, canAssi
     const isBlock = scheduleMode === "block";
     if (isBlock && (!form.start || timeToMinutes(form.start) >= timeToMinutes(form.blockEnd))) {
       onError("Para bloquear, la hora de fin debe ser posterior al inicio.");
+      return;
+    }
+    if (canSetSchedule && scheduleMode !== "unscheduled" && isPastScheduledTime(form.date || localISO(), form.start)) {
+      onError("No se puede asignar una tarea en un horario que ya paso.");
       return;
     }
     savingRef.current = true;

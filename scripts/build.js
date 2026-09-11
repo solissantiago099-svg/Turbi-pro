@@ -138,6 +138,34 @@ function timeToMinutes(value) {
   return Number(hours) * 60 + Number(minutes);
 }
 
+function buenosAiresDateParts(date = new Date()) {
+  const parts = new Intl.DateTimeFormat("en-CA", {
+    timeZone: "America/Argentina/Buenos_Aires",
+    year: "numeric",
+    month: "2-digit",
+    day: "2-digit",
+    hour: "2-digit",
+    minute: "2-digit",
+    hour12: false,
+    hourCycle: "h23",
+  }).formatToParts(date);
+  return Object.fromEntries(parts.filter((part) => part.type !== "literal").map((part) => [part.type, part.value]));
+}
+
+function localISO(date = new Date()) {
+  const parts = buenosAiresDateParts(date);
+  return parts.year + "-" + parts.month + "-" + parts.day;
+}
+
+function isPastScheduledTime(date, start, now = new Date()) {
+  if (!date || !start) return false;
+  const today = localISO(now);
+  if (date < today) return true;
+  if (date > today) return false;
+  const parts = buenosAiresDateParts(now);
+  return timeToMinutes(start) < Number(parts.hour) * 60 + Number(parts.minute);
+}
+
 function rangesOverlap(startA, endA, startB, endB) {
   return startA < endB && startB < endA;
 }
@@ -633,6 +661,9 @@ async function saveTask(request, env, mode, ctx) {
   const ownBlockId = scheduleBlockIdForTask(nextTask);
   const scheduleBlocks = settings.scheduleBlocks || [];
   const validationBlocks = ownBlockId ? scheduleBlocks.filter((block) => String(block.id) !== String(ownBlockId)) : scheduleBlocks;
+  if ((!existing || existing.date !== nextTask.date || existing.start !== nextTask.start) && isPastScheduledTime(nextTask.date, nextTask.start)) {
+    return Response.json({ error: "No se puede asignar una tarea en un horario que ya paso." }, { status: 400 });
+  }
   const blocked = findScheduleBlock(nextTask, validationBlocks);
   if (blocked) return Response.json({ error: "Ese horario esta bloqueado: " + (blocked.title || "Bloqueo operativo") + "." }, { status: 400 });
   let block = null;
@@ -696,6 +727,7 @@ async function scheduleTaskRecord(request, env) {
   if (task.start) return Response.json({ error: "Esta tarea ya tiene un horario asignado." }, { status: 400 });
   if (normalizedRole(user.role) === "chofer" && Number(task.driverId || user.currentDriverId) !== Number(user.currentDriverId)) return Response.json({ error: "Esta tarea no esta asignada a este chofer." }, { status: 403 });
   const nextTask = { ...task, date: payload.date || task.date, start: payload.start || "", updatedAt: new Date().toISOString() };
+  if (isPastScheduledTime(nextTask.date, nextTask.start)) return Response.json({ error: "No se puede asignar una tarea en un horario que ya paso." }, { status: 400 });
   const settings = await readSettings(env);
   const blocked = findScheduleBlock(nextTask, settings.scheduleBlocks || []);
   if (blocked) return Response.json({ error: "Ese horario esta bloqueado: " + (blocked.title || "Bloqueo operativo") + "." }, { status: 400 });
