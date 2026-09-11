@@ -911,6 +911,7 @@ async function scheduleTaskRecord(request, env) {
   await storeRecord(env, "task", nextTask);
   const meta = await bumpRevision(env, user);
   await audit(env, user, "schedule-task", "task", String(task.id), { revision: meta.revision });
+  await notifyTaskAssignment(env, nextTask, user).catch(() => null);
   return stateResponse(env, user);
 }
 
