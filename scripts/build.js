@@ -493,7 +493,7 @@ async function vapidToken(env, audience) {
   const jwk = JSON.parse(env.TAMIZ_VAPID_PRIVATE_JWK);
   const key = await crypto.subtle.importKey("jwk", jwk, { name: "ECDSA", namedCurve: "P-256" }, false, ["sign"]);
   const header = base64UrlText(JSON.stringify({ typ: "JWT", alg: "ES256" }));
-  const payload = base64UrlText(JSON.stringify({ aud: audience, exp: Math.floor(Date.now() / 1000) + 43200, sub: "mailto:operaciones@tamiz.local" }));
+  const payload = base64UrlText(JSON.stringify({ aud: audience, exp: Math.floor(Date.now() / 1000) + 43200, sub: "mailto:solissantiago099@gmail.com" }));
   const unsigned = header + "." + payload;
   const signature = await crypto.subtle.sign({ name: "ECDSA", hash: "SHA-256" }, key, new TextEncoder().encode(unsigned));
   return unsigned + "." + base64UrlBytes(signature);
@@ -568,15 +568,21 @@ async function sendPush(subscription, env, payload) {
   const token = await vapidToken(env, audience);
   if (!token) return { ok: false, status: 0, error: "vapid faltante" };
   const body = await encryptedPushBody(subscription, payload);
+  const headers = {
+    TTL: "86400",
+    Urgency: "high",
+    "Content-Encoding": "aes128gcm",
+    "Content-Type": "application/octet-stream",
+  };
+  if (/webpush\.push\.apple\.com/i.test(endpoint)) {
+    headers.Authorization = "WebPush " + token;
+    headers["Crypto-Key"] = "p256ecdsa=" + VAPID_PUBLIC_KEY;
+  } else {
+    headers.Authorization = "vapid t=" + token + ", k=" + VAPID_PUBLIC_KEY;
+  }
   const response = await fetch(endpoint, {
     method: "POST",
-    headers: {
-      TTL: "86400",
-      Urgency: "high",
-      "Content-Encoding": "aes128gcm",
-      "Content-Type": "application/octet-stream",
-      Authorization: "vapid t=" + token + ", k=" + VAPID_PUBLIC_KEY,
-    },
+    headers,
     body,
   });
   return { ok: response.ok, status: response.status, gone: response.status === 404 || response.status === 410 };
@@ -860,7 +866,7 @@ async function saveTask(request, env, mode, ctx) {
   }
   const meta = await bumpRevision(env, user);
   await audit(env, user, mode === "create" ? "create-task" : "update-task", "task", String(nextTask.id), { revision: meta.revision });
-  const shouldNotify = nextTask.driverId && (mode === "create" || Number(existing?.driverId || 0) !== Number(nextTask.driverId));
+  const shouldNotify = mode === "create" || (nextTask.driverId && Number(existing?.driverId || 0) !== Number(nextTask.driverId));
   if (shouldNotify) {
     const notification = notifyTaskAssignment(env, nextTask, user).catch(() => null);
     if (ctx?.waitUntil) ctx.waitUntil(notification);
