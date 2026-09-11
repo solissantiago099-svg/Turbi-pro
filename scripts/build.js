@@ -513,16 +513,23 @@ async function savePushSubscription(request, env) {
     return Response.json({ error: "Suscripcion invalida" }, { status: 400 });
   }
   const current = await readPushSubscriptions(env);
+  const previous = current.find((item) => item.subscription?.endpoint === subscription.endpoint);
   const next = current.filter((item) => item.subscription?.endpoint !== subscription.endpoint);
+  const now = new Date().toISOString();
   next.push({
-    id: crypto.randomUUID(),
+    id: previous?.id || crypto.randomUUID(),
     userId: user.id,
     username: user.username || "",
     role: normalizedRole(user.role),
     currentDriverId: user.currentDriverId || null,
     subscription,
     device,
-    updatedAt: new Date().toISOString(),
+    firstSeenAt: previous?.firstSeenAt || now,
+    updatedAt: now,
+    lastPushAt: previous?.lastPushAt || null,
+    lastPushOk: previous?.lastPushOk ?? null,
+    lastPushStatus: previous?.lastPushStatus || null,
+    lastPushError: previous?.lastPushError || "",
   });
   await writeSettingKey(env, "push_subscriptions", next.slice(-250), user);
   await audit(env, user, "subscribe-push", "user", user.id);
@@ -556,10 +563,10 @@ async function encryptedPushBody(subscription, payload) {
 
 async function sendPush(subscription, env, payload) {
   const endpoint = subscription?.endpoint || "";
-  if (!endpoint) return { ok: false };
+  if (!endpoint) return { ok: false, status: 0, error: "endpoint faltante" };
   const audience = new URL(endpoint).origin;
   const token = await vapidToken(env, audience);
-  if (!token) return { ok: false };
+  if (!token) return { ok: false, status: 0, error: "vapid faltante" };
   const body = await encryptedPushBody(subscription, payload);
   const response = await fetch(endpoint, {
     method: "POST",
@@ -572,19 +579,79 @@ async function sendPush(subscription, env, payload) {
     },
     body,
   });
-  return { ok: response.ok, gone: response.status === 404 || response.status === 410 };
+  return { ok: response.ok, status: response.status, gone: response.status === 404 || response.status === 410 };
 }
 
 async function sendPushToTargets(env, targets, payload, user) {
   if (!env.TAMIZ_VAPID_PRIVATE_JWK) return;
   if (!targets.length) return;
   const results = await Promise.allSettled(targets.map((item) => sendPush(item.subscription, env, payload)));
+  const now = new Date().toISOString();
   const goneEndpoints = new Set(results.map((result, index) => result.status === "fulfilled" && result.value.gone ? targets[index].subscription.endpoint : null).filter(Boolean));
-  if (goneEndpoints.size) {
-    const subscriptions = await readPushSubscriptions(env);
-    await writeSettingKey(env, "push_subscriptions", subscriptions.filter((item) => !goneEndpoints.has(item.subscription?.endpoint)), user);
-  }
+  const resultByEndpoint = new Map(results.map((result, index) => {
+    const endpoint = targets[index].subscription.endpoint;
+    if (result.status === "fulfilled") return [endpoint, result.value];
+    return [endpoint, { ok: false, status: 0, error: result.reason?.message || "error de envio" }];
+  }));
+  const subscriptions = await readPushSubscriptions(env);
+  const updated = subscriptions
+    .filter((item) => !goneEndpoints.has(item.subscription?.endpoint))
+    .map((item) => {
+      const result = resultByEndpoint.get(item.subscription?.endpoint);
+      if (!result) return item;
+      return {
+        ...item,
+        lastPushAt: now,
+        lastPushOk: Boolean(result.ok),
+        lastPushStatus: result.status || null,
+        lastPushError: result.ok ? "" : (result.error || ("HTTP " + (result.status || 0))),
+      };
+    });
+  await writeSettingKey(env, "push_subscriptions", updated, user);
   return { total: targets.length, sent: results.filter((result) => result.status === "fulfilled" && result.value.ok).length, removed: goneEndpoints.size };
+}
+
+function pushDeviceLabel(device = {}) {
+  const agent = String(device.userAgent || "");
+  if (/iphone|ipad|ipod/i.test(agent)) return "iPhone / iPad";
+  if (/android/i.test(agent)) return "Android";
+  if (/windows/i.test(agent)) return "Windows";
+  if (/mac os/i.test(agent)) return "Mac";
+  return "Dispositivo";
+}
+
+function pushBrowserLabel(device = {}) {
+  const agent = String(device.userAgent || "");
+  if (/crios|chrome/i.test(agent)) return "Chrome";
+  if (/fxios|firefox/i.test(agent)) return "Firefox";
+  if (/safari/i.test(agent) && !/chrome|crios/i.test(agent)) return "Safari";
+  if (/edg/i.test(agent)) return "Edge";
+  return "Navegador";
+}
+
+function pushDevicesResponse(subscriptions) {
+  return subscriptions.map((item) => ({
+    id: item.id,
+    username: item.username || "Usuario",
+    role: item.role || "",
+    platform: pushDeviceLabel(item.device),
+    browser: pushBrowserLabel(item.device),
+    standalone: Boolean(item.device?.standalone),
+    firstSeenAt: item.firstSeenAt || item.updatedAt || null,
+    updatedAt: item.updatedAt || null,
+    lastPushAt: item.lastPushAt || null,
+    lastPushOk: item.lastPushOk ?? null,
+    lastPushStatus: item.lastPushStatus || null,
+    lastPushError: item.lastPushError || "",
+  }));
+}
+
+async function listPushDevices(request, env) {
+  const user = await currentUser(request, env);
+  if (!user) return Response.json({ error: "Se requiere inicio de sesion" }, { status: 401 });
+  if (!isAdmin(user)) return Response.json({ error: "No autorizado" }, { status: 403 });
+  const subscriptions = await readPushSubscriptions(env);
+  return Response.json({ devices: pushDevicesResponse(subscriptions) }, { headers: { "cache-control": "no-store" } });
 }
 
 async function notifyTaskAssignment(env, task, user) {
@@ -923,6 +990,7 @@ export default {
     if (url.pathname === "/api/state" && request.method === "PUT") return writeState(request, env);
     if (url.pathname === "/api/push/public-key" && request.method === "GET") return pushPublicKey();
     if (url.pathname === "/api/push/subscribe" && request.method === "POST") return savePushSubscription(request, env);
+    if (url.pathname === "/api/push/devices" && request.method === "GET") return listPushDevices(request, env);
     if (url.pathname === "/api/push/test" && request.method === "POST") return testPushNotification(request, env);
     if (url.pathname === "/api/tasks" && request.method === "POST") return saveTask(request, env, "create", ctx);
     if (url.pathname === "/api/tasks" && request.method === "PUT") return saveTask(request, env, "edit", ctx);

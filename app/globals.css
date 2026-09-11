@@ -1044,8 +1044,42 @@ textarea {
   color: var(--green-dark);
 }
 
+.status.danger {
+  background: #fff0f0;
+  border-color: #e8b6b6;
+  color: var(--danger);
+}
+
 .notificationButton {
   background: #fffdf8;
+}
+
+.pushDiagnostics {
+  gap: 12px;
+}
+
+.pushDeviceList {
+  display: grid;
+  gap: 8px;
+  margin-top: 12px;
+}
+
+.pushDevice {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  border-top: 1px solid var(--line);
+  padding-top: 10px;
+}
+
+.pushDevice > div {
+  display: grid;
+  gap: 3px;
+}
+
+.pushDevice small {
+  color: var(--muted);
 }
 
 .empty {

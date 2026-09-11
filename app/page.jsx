@@ -398,6 +398,7 @@ async function localApiFetch(path, options = {}) {
   }
   if (path === "/api/push/public-key" && method === "GET") return localResponse({ publicKey: VAPID_PUBLIC_KEY, supported: true });
   if (path === "/api/push/subscribe" && method === "POST") return localResponse({ ok: true });
+  if (path === "/api/push/devices" && method === "GET") return localResponse({ devices: [] });
   if (path === "/api/push/test" && method === "POST") return localResponse({ total: 1, sent: 1, removed: 0 });
   if (path === "/api/login" && method === "POST") {
     const credentials = JSON.parse(options.body || "{}");
@@ -1188,11 +1189,6 @@ export default function Home() {
                 <Bell size={16} /> {pushState === "saving" ? "Activando..." : "Activar avisos"}
               </button>
             ) : null}
-            {pushState === "enabled" || currentRole === "admin" ? (
-              <button className="btn notificationButton" type="button" onClick={sendTestNotification} disabled={pushState === "saving"}>
-                <Bell size={16} /> {pushState === "saving" ? "Enviando..." : "Probar aviso"}
-              </button>
-            ) : null}
             <button className="btn" onClick={logout}>
               <LogOut size={16} /> Salir
             </button>
@@ -1311,7 +1307,7 @@ export default function Home() {
           {view === "contactos" && <ContactsPanel users={users} currentUser={user} />}
           {view === "choferes" && <Records items={db.drivers} type="driver" users={users} onSave={saveDriver} />}
           {view === "perfil" && <ProfilePanel user={user} currentDriver={currentDriver} onSave={saveProfile} />}
-          {view === "configuracion" && <SettingsPanel user={user} users={users} db={db} token={token} revision={revision} onUsers={setUsers} onUser={setUser} onNotify={notify} />}
+          {view === "configuracion" && <SettingsPanel user={user} users={users} db={db} token={token} revision={revision} onUsers={setUsers} onUser={setUser} onNotify={notify} onTestPush={sendTestNotification} />}
         </div>
       </section>
       {toast ? <div className={`toast show ${toast.type === "error" ? "error" : ""}`}>{toast.message}</div> : null}
@@ -2628,8 +2624,10 @@ function ProfilePanel({ user, currentDriver, onSave }) {
   );
 }
 
-function SettingsPanel({ user, users, db, token, revision, onUsers, onUser, onNotify }) {
+function SettingsPanel({ user, users, db, token, revision, onUsers, onUser, onNotify, onTestPush }) {
   const [editingUser, setEditingUser] = useState(null);
+  const [pushDevices, setPushDevices] = useState([]);
+  const [loadingPushDevices, setLoadingPushDevices] = useState(false);
 
   async function saveUser(payload) {
     const response = await appFetch("/api/users", {
@@ -2647,6 +2645,24 @@ function SettingsPanel({ user, users, db, token, revision, onUsers, onUser, onNo
     setEditingUser(null);
     onNotify(payload.id ? "Usuario actualizado" : "Usuario creado");
   }
+
+  async function loadPushDevices() {
+    setLoadingPushDevices(true);
+    try {
+      const response = await appFetch("/api/push/devices", { headers: apiHeaders(token, { accept: "application/json" }) });
+      const result = await response.json().catch(() => ({}));
+      if (!response.ok) throw new Error(result.error || "No se pudo leer el diagnostico");
+      setPushDevices(result.devices || []);
+    } catch (error) {
+      onNotify(error.message || "No se pudo leer el diagnostico", "error");
+    } finally {
+      setLoadingPushDevices(false);
+    }
+  }
+
+  useEffect(() => {
+    if (token) loadPushDevices();
+  }, [token]);
 
   return (
     <>
@@ -2677,6 +2693,32 @@ function SettingsPanel({ user, users, db, token, revision, onUsers, onUser, onNo
           <span className="eyebrow">SINCRONIZACION</span>
           <h2>Base compartida</h2>
           <p>Revision actual: {revision}</p>
+        </article>
+        <article className="card pushDiagnostics">
+          <div className="record">
+            <div>
+              <span className="eyebrow">AVISOS</span>
+              <h2>Dispositivos</h2>
+              <p>{pushDevices.length ? `${pushDevices.length} dispositivo${pushDevices.length === 1 ? "" : "s"} registrado${pushDevices.length === 1 ? "" : "s"}` : "Sin dispositivos registrados"}</p>
+            </div>
+            <div className="recordActions">
+              <button className="btn" type="button" onClick={loadPushDevices} disabled={loadingPushDevices}>{loadingPushDevices ? "Leyendo..." : "Actualizar"}</button>
+              <button className="btn" type="button" onClick={async () => { await onTestPush(); await loadPushDevices(); }}>Probar</button>
+            </div>
+          </div>
+          {pushDevices.length ? (
+            <div className="pushDeviceList">
+              {pushDevices.map((device) => (
+                <div className="pushDevice" key={device.id}>
+                  <div>
+                    <b>{device.username}</b>
+                    <small>{device.platform} - {device.browser}{device.standalone ? " - app instalada" : ""}</small>
+                  </div>
+                  <span className={`status ${device.lastPushOk === false ? "danger" : ""}`}>{device.lastPushOk === null ? "sin prueba" : device.lastPushOk ? `ok ${device.lastPushStatus || ""}` : device.lastPushError || "fallo"}</span>
+                </div>
+              ))}
+            </div>
+          ) : null}
         </article>
         {users.map((item) => (
           <article className="card record" key={item.id}>
