@@ -471,6 +471,10 @@ function appFetch(path, options) {
   return isLocalPreview() && path.startsWith("/api/") ? localApiFetch(path, options) : fetch(path, options);
 }
 
+function isLocalMode() {
+  return isLocalPreview();
+}
+
 async function ensureServiceWorkerRegistration() {
   if (!("serviceWorker" in navigator)) return null;
   const current = await navigator.serviceWorker.getRegistration("/");
