@@ -663,12 +663,14 @@ async function listPushDevices(request, env) {
 async function notifyTaskAssignment(env, task, user) {
   const subscriptions = await readPushSubscriptions(env);
   const targets = taskNotificationTargets(subscriptions, task);
-  return sendPushToTargets(env, targets, {
+  const result = await sendPushToTargets(env, targets, {
     title: "Nueva tarea asignada",
     body: (task.start ? formatTime24(task.start) + " - " : "") + (task.title || "Abrí TAMIZ RUTAS para ver el detalle."),
     tag: "tamiz-task-" + String(task.id || Date.now()),
     url: "/",
   }, user);
+  await audit(env, user, "notify-task", "task", String(task.id || ""), result || { total: 0, sent: 0, removed: 0 });
+  return result;
 }
 
 async function testPushNotification(request, env) {
@@ -779,6 +781,7 @@ async function writeState(request, env) {
   }
   const previousData = await stateData(env);
   const nextData = structuredClone(payload.data);
+  const createdTasks = [];
   if (previousData?.tasks) {
     const previousTasks = new Map(previousData.tasks.map(task => [String(task.id), task]));
     for (const nextTask of nextData.tasks) {
@@ -786,6 +789,7 @@ async function writeState(request, env) {
       if (!previousTask) {
         nextTask.assignedByUserId = user.id;
         nextTask.assignedByUserName = user.name || user.username || user.email || "Usuario";
+        createdTasks.push(nextTask);
         continue;
       }
       const { status: previousStatus, updatedAt: previousUpdatedAt, ...previousContent } = previousTask;
@@ -810,6 +814,7 @@ async function writeState(request, env) {
   await replaceStateTables(env, nextData, user);
   const meta = await bumpRevision(env, user);
   await audit(env, user, payload.action || "save-state", "app_state", "default", { revision: meta.revision });
+  for (const task of createdTasks) await notifyTaskAssignment(env, task, user).catch(() => null);
   return stateResponse(env, user);
 }
 
@@ -868,9 +873,7 @@ async function saveTask(request, env, mode, ctx) {
   await audit(env, user, mode === "create" ? "create-task" : "update-task", "task", String(nextTask.id), { revision: meta.revision });
   const shouldNotify = mode === "create" || (nextTask.driverId && Number(existing?.driverId || 0) !== Number(nextTask.driverId));
   if (shouldNotify) {
-    const notification = notifyTaskAssignment(env, nextTask, user).catch(() => null);
-    if (ctx?.waitUntil) ctx.waitUntil(notification);
-    else await notification;
+    await notifyTaskAssignment(env, nextTask, user).catch(() => null);
   }
   return stateResponse(env, user);
 }
