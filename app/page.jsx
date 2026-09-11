@@ -1183,7 +1183,8 @@ export default function Home() {
               <button className="btn notificationButton" type="button" onClick={enableNotifications} disabled={pushState === "saving"}>
                 <Bell size={16} /> {pushState === "saving" ? "Activando..." : "Activar avisos"}
               </button>
-            ) : pushState === "enabled" ? (
+            ) : null}
+            {pushState === "enabled" || currentRole === "admin" ? (
               <button className="btn notificationButton" type="button" onClick={sendTestNotification} disabled={pushState === "saving"}>
                 <Bell size={16} /> {pushState === "saving" ? "Enviando..." : "Probar aviso"}
               </button>
