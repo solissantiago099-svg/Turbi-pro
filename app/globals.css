@@ -1576,6 +1576,10 @@ textarea {
   margin-top: 16px;
 }
 
+.legalEntityCard {
+  margin: 0;
+}
+
 .legalEntity {
   display: grid;
   gap: 12px;
@@ -1622,6 +1626,29 @@ textarea {
   border-top: 1px solid var(--line);
   padding-top: 12px;
 }
+
+.legalEntityFields > div {
+  display: grid;
+  gap: 4px;
+  border: 1px solid #e5dccf;
+  border-radius: 8px;
+  padding: 10px;
+  background: #fffdf8;
+}
+
+.legalEntityFields span {
+  color: var(--muted);
+  font-family: var(--font-mono);
+  font-size: 11px;
+  font-weight: 900;
+  text-transform: uppercase;
+}
+
+.legalEntityFields b {
+  color: var(--ink);
+  font-size: 16px;
+}
+
 .legalEntityNumber {
   display: grid;
   place-items: center;
@@ -1642,7 +1669,11 @@ textarea {
 }
 
 .legalEntityFields {
-  grid-template-columns: 1fr;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+}
+
+.legalEntityFields > div:nth-child(3) {
+  grid-column: 1 / -1;
 }
 
 .legalEntityDocs {
@@ -1712,6 +1743,35 @@ textarea {
 .legalEntitiesActions {
   display: none;
 }
+
+.legalEntitiesActions:empty {
+  display: none;
+}
+
+.contactsGrid {
+  align-items: stretch;
+}
+
+.contactCard {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 14px;
+}
+
+.contactCard h3 {
+  margin: 5px 0;
+}
+
+.contactCard p {
+  margin: 0;
+  color: var(--muted);
+}
+
+.profileCard {
+  max-width: 780px;
+}
+
 .vehicleDocs {
   display: grid;
   gap: 10px;
@@ -2101,6 +2161,15 @@ textarea {
 
   .legalEntitiesActions {
     display: flex;
+  }
+
+  .legalEntitiesActions:empty {
+    display: none;
+  }
+
+  .contactCard {
+    align-items: flex-start;
+    flex-direction: column;
   }
   .week {
     display: flex;

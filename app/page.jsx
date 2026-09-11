@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useMemo, useRef, useState } from "react";
-import { Bell, CalendarDays, ChevronDown, ChevronLeft, ChevronRight, Download, Edit3, LogOut, MapPin, Menu, Phone, Plus, Route, Search, Settings, Trash2, Truck, UserPlus, Users, X } from "lucide-react";
+import { Bell, CalendarDays, ChevronDown, ChevronLeft, ChevronRight, Download, Edit3, FileText, IdCard, LogOut, MapPin, Menu, Phone, Plus, Route, Search, Settings, Trash2, Truck, UserCircle, UserPlus, Users, X } from "lucide-react";
 
 const VAPID_PUBLIC_KEY = "BOgzmxTmjpL2edxhwwe1W0MYXq_NsI-4NiJm2uNYJdMNM9HZgFNIxP6yrGJSmtnfa-aVEmAlr6nn8Q-zbQEAm7g";
 
@@ -9,8 +9,11 @@ const views = [
   { id: "agenda", label: "Agenda", subtitle: "Planificacion diaria", icon: CalendarDays, roles: ["admin", "usuario"] },
   { id: "ruta", label: "Mi ruta", subtitle: "Trabajo del chofer", icon: Route, roles: ["admin", "chofer"] },
   { id: "nueva", label: "Nueva tarea", subtitle: "Carga rapida", icon: Plus, roles: ["admin", "usuario"] },
+  { id: "documentos", label: "Documentos", subtitle: "Razones sociales", icon: FileText, roles: ["admin", "usuario", "chofer"] },
+  { id: "contactos", label: "Contactos", subtitle: "Equipo operativo", icon: Phone, roles: ["chofer"] },
   { id: "vehiculos", label: "Vehiculos", subtitle: "Flota y documentacion", icon: Truck, roles: ["admin"] },
   { id: "choferes", label: "Choferes", subtitle: "Equipo activo", icon: Users, roles: ["admin"] },
+  { id: "perfil", label: "Mi perfil", subtitle: "Datos personales", icon: UserCircle, roles: ["admin", "usuario", "chofer"] },
   { id: "configuracion", label: "Configuracion", subtitle: "Usuarios y respaldo", icon: Settings, roles: ["admin"] },
 ];
 
@@ -142,18 +145,20 @@ function defaultVehicleDocs() {
 }
 
 function defaultLegalEntities() {
-  return Array.from({ length: 4 }, (_, index) => ({
-    id: `razon-social-${index + 1}`,
-    name: "",
-    email: "",
-    afip: null,
-    iibb: null,
-  }));
+  return [
+    { id: "dondera", name: "DONDERA", cuit: "30-71710929-1", email: "", afip: null, iibb: null },
+    { id: "1876", name: "1876", cuit: "30-71690382-2", email: "", afip: null, iibb: null },
+    { id: "kumitate", name: "KUMITATE", cuit: "30-71807733-4", email: "", afip: null, iibb: null },
+    { id: "luar", name: "LUAR", cuit: "30-71713990-5", email: "", afip: null, iibb: null },
+  ];
 }
 
 function normalizedLegalEntities(entities) {
   const current = Array.isArray(entities) ? entities : [];
-  return defaultLegalEntities().map((fallback, index) => ({ ...fallback, ...(current[index] || {}) }));
+  return defaultLegalEntities().map((fallback, index) => {
+    const existing = current.find((entity) => entity?.id === fallback.id) || current[index] || {};
+    return { ...fallback, ...existing, name: existing.name || fallback.name, cuit: existing.cuit || fallback.cuit };
+  });
 }
 function fileToDataURL(file) {
   return new Promise((resolve, reject) => {
@@ -277,6 +282,10 @@ function taskAssignerLabel(task) {
   return createdDateTime ? `${assigner} - ${createdDateTime}` : assigner;
 }
 
+function taskAssignerUser(task, users = []) {
+  return users.find((item) => item?.id && task?.assignedByUserId && String(item.id) === String(task.assignedByUserId)) || null;
+}
+
 function encodeMap(value) {
   return encodeURIComponent(value || "");
 }
@@ -340,6 +349,17 @@ function publicLocalUsers(users = localUsers) {
   return users.map(({ password: _password, ...user }) => user);
 }
 
+function contactUsers(users = localUsers) {
+  return publicLocalUsers(users).map((user) => ({
+    id: user.id,
+    username: user.username,
+    name: user.name,
+    role: user.role,
+    phone: user.phone || "",
+    currentDriverId: user.currentDriverId || null,
+  }));
+}
+
 function urlBase64ToUint8Array(value) {
   const padding = "=".repeat((4 - (value.length % 4)) % 4);
   const base64 = (value + padding).replace(/-/g, "+").replace(/_/g, "/");
@@ -383,11 +403,18 @@ async function localApiFetch(path, options = {}) {
     const credentials = JSON.parse(options.body || "{}");
     const found = savedUsers.find((item) => item.username === String(credentials.username || "").toLowerCase() && item.password === credentials.password);
     if (!found) return localResponse({ error: "Usuario o contrasena incorrectos" }, 401);
-    return localResponse({ token: `local:${found.username}`, user: publicLocalUsers([found])[0], users: publicLocalUsers(savedUsers) });
+    return localResponse({ token: `local:${found.username}`, user: publicLocalUsers([found])[0], users: contactUsers(savedUsers) });
   }
   if (path === "/api/logout") return localResponse({ ok: true });
   if (!current) return localResponse({ error: "Sesion vencida" }, 401);
-  if (path === "/api/session") return localResponse({ user: publicLocalUsers([current])[0], users: publicLocalUsers(savedUsers) });
+  if (path === "/api/session") return localResponse({ user: publicLocalUsers([current])[0], users: contactUsers(savedUsers) });
+  if (path === "/api/me" && method === "PUT") {
+    const payload = JSON.parse(options.body || "{}");
+    const nextCurrent = { ...current, name: String(payload.name || current.name || "").trim(), phone: String(payload.phone || "").trim(), password: payload.password || current.password };
+    const nextUsers = savedUsers.map((item) => item.id === current.id ? nextCurrent : item);
+    localStorage.setItem("tamiz_local_users", JSON.stringify(nextUsers));
+    return localResponse({ user: publicLocalUsers([nextCurrent])[0], users: contactUsers(nextUsers), data: JSON.parse(localStorage.getItem("tamiz_local_state") || "null") || seed });
+  }
   if (path === "/api/state" && method === "GET") {
     const storedData = JSON.parse(localStorage.getItem("tamiz_local_state") || "null") || seed;
     const data = {
@@ -400,7 +427,7 @@ async function localApiFetch(path, options = {}) {
     };
     localStorage.setItem("tamiz_local_state", JSON.stringify(data));
     const revision = Number(localStorage.getItem("tamiz_local_revision") || 1);
-    return localResponse({ user: publicLocalUsers([current])[0], users: publicLocalUsers(savedUsers), data, revision });
+    return localResponse({ user: publicLocalUsers([current])[0], users: contactUsers(savedUsers), data, revision });
   }
   if (path === "/api/state" && method === "PUT") {
     const payload = JSON.parse(options.body || "{}");
@@ -435,7 +462,7 @@ async function localApiFetch(path, options = {}) {
     const nextUsers = existing ? savedUsers.map((item) => item.id === existing.id ? nextUser : item) : [...savedUsers, nextUser];
     localStorage.setItem("tamiz_local_users", JSON.stringify(nextUsers));
     const nextCurrent = nextUser.id === current.id ? publicLocalUsers([nextUser])[0] : publicLocalUsers([current])[0];
-    return localResponse({ user: nextCurrent, users: publicLocalUsers(nextUsers) });
+    return localResponse({ user: nextCurrent, users: contactUsers(nextUsers) });
   }
   return localResponse({ error: "Endpoint local no disponible" }, 404);
 }
@@ -1023,6 +1050,26 @@ export default function Home() {
     };
     await savePartial("/api/legal-entities", "PUT", { entities: nextEntities }, nextDb, "Documentacion recurrente actualizada");
   }
+
+  async function saveProfile(payload) {
+    const response = await appFetch("/api/me", {
+      method: "PUT",
+      headers: apiHeaders(token, { "content-type": "application/json" }),
+      body: JSON.stringify(payload),
+    });
+    const result = await response.json().catch(() => ({}));
+    if (!response.ok) {
+      notify(result.error || "No se pudo actualizar el perfil", "error");
+      return false;
+    }
+    if (result.user) setUser(result.user);
+    if (Array.isArray(result.users)) setUsers(result.users);
+    if (result.data) setDb(result.data);
+    if (result.revision) setRevision(Number(result.revision));
+    notify("Perfil actualizado");
+    return true;
+  }
+
   async function saveScheduleBlocks(nextBlocks) {
     const nextDb = {
       ...db,
@@ -1097,8 +1144,10 @@ export default function Home() {
             <p>{currentView.subtitle}</p>
           </div>
           <div className="topActions">
-            {phoneHref(currentDriver?.phone) ? (
+            {currentRole !== "chofer" && phoneHref(currentDriver?.phone) ? (
               <a className="iconBtn callIconBtn" href={phoneHref(currentDriver.phone)} aria-label={`Llamar a ${currentDriver.name}`} title={`Llamar a ${currentDriver.name}`}><Phone size={18} /></a>
+            ) : currentRole === "chofer" ? (
+              <button className="iconBtn callIconBtn" type="button" onClick={() => setView("contactos")} aria-label="Ver contactos" title="Ver contactos"><Phone size={18} /></button>
             ) : (
               <button className="iconBtn callIconBtn" type="button" disabled aria-label="Chofer sin telefono" title="Carga el telefono desde Choferes"><Phone size={18} /></button>
             )}
@@ -1143,6 +1192,7 @@ export default function Home() {
                 date={selectedDate}
                 tasks={dayTasks}
                 db={db}
+                users={users}
                 scheduleBlocks={scheduleBlocks}
                 showSummary={false}
                 canCreate={canManageTasks}
@@ -1182,21 +1232,21 @@ export default function Home() {
                 </div>
               </div>
               <RouteTaskGroup title="Tareas del dia" count={routeTasks.filter((task) => task.start && task.status !== "realizada").length + routeBlocks.length} defaultOpen>
-                <TaskList tasks={routeTasks.filter((task) => task.start && task.status !== "realizada")} blocks={routeBlocks} db={db} currentUser={user} onStatus={updateTask} onSchedule={scheduleTask} canSchedule={false} canOperate canChangeStatus={canChangeTaskStatus} onEdit={(task) => {
+                <TaskList tasks={routeTasks.filter((task) => task.start && task.status !== "realizada")} blocks={routeBlocks} db={db} users={users} currentUser={user} onStatus={updateTask} onSchedule={scheduleTask} canSchedule={false} canOperate canChangeStatus={canChangeTaskStatus} onEdit={(task) => {
                   setEditingTask(task);
                   setTaskPrefill({ date: task.date, time: task.start });
                   setView("nueva");
                 }} />
               </RouteTaskGroup>
               <RouteTaskGroup title="Tareas sin horario" count={routeTasks.filter((task) => !task.start && task.status !== "realizada").length} defaultOpen>
-                <TaskList tasks={routeTasks.filter((task) => !task.start && task.status !== "realizada")} db={db} currentUser={user} onStatus={updateTask} onSchedule={scheduleTask} canSchedule={["admin", "usuario", "chofer"].includes(currentRole)} canOperate canChangeStatus={canChangeTaskStatus} onEdit={(task) => {
+                <TaskList tasks={routeTasks.filter((task) => !task.start && task.status !== "realizada")} db={db} users={users} currentUser={user} onStatus={updateTask} onSchedule={scheduleTask} canSchedule={["admin", "usuario", "chofer"].includes(currentRole)} canOperate canChangeStatus={canChangeTaskStatus} onEdit={(task) => {
                   setEditingTask(task);
                   setTaskPrefill({ date: task.date, time: task.start });
                   setView("nueva");
                 }} />
               </RouteTaskGroup>
               <RouteTaskGroup title="Tareas realizadas" count={routeTasks.filter((task) => task.status === "realizada").length}>
-                <TaskList tasks={routeTasks.filter((task) => task.status === "realizada")} db={db} currentUser={user} onStatus={updateTask} onSchedule={scheduleTask} canSchedule={false} canOperate canChangeStatus={canChangeTaskStatus} onEdit={(task) => {
+                <TaskList tasks={routeTasks.filter((task) => task.status === "realizada")} db={db} users={users} currentUser={user} onStatus={updateTask} onSchedule={scheduleTask} canSchedule={false} canOperate canChangeStatus={canChangeTaskStatus} onEdit={(task) => {
                   setEditingTask(task);
                   setTaskPrefill({ date: task.date, time: task.start });
                   setView("nueva");
@@ -1221,8 +1271,11 @@ export default function Home() {
             />
           )}
 
-          {view === "vehiculos" && <Records items={db.vehicles} type="vehicle" legalEntities={db.settings?.legalEntities} onSaveLegalEntities={saveLegalEntities} onSave={saveVehicle} />}
+          {view === "documentos" && <DocumentsPanel entities={db.settings?.legalEntities} canEdit={isAdmin} onSave={saveLegalEntities} />}
+          {view === "contactos" && <ContactsPanel users={users} currentUser={user} />}
+          {view === "vehiculos" && <Records items={db.vehicles} type="vehicle" onSave={saveVehicle} />}
           {view === "choferes" && <Records items={db.drivers} type="driver" users={users} onSave={saveDriver} />}
+          {view === "perfil" && <ProfilePanel user={user} currentDriver={currentDriver} onSave={saveProfile} />}
           {view === "configuracion" && <SettingsPanel user={user} users={users} db={db} token={token} revision={revision} onUsers={setUsers} onUser={setUser} onNotify={notify} />}
         </div>
       </section>
@@ -1270,7 +1323,7 @@ function RouteTaskGroup({ title, count, defaultOpen = false, children }) {
     </details>
   );
 }
-function TaskList({ tasks, blocks = [], db, currentUser, onStatus, onEdit, onSchedule, canSchedule, canOperate, canChangeStatus }) {
+function TaskList({ tasks, blocks = [], db, users = [], currentUser, onStatus, onEdit, onSchedule, canSchedule, canOperate, canChangeStatus }) {
   const entries = [
     ...tasks.map((task) => ({ kind: "task", start: task.start || "", task })),
     ...blocks.map((block) => ({ kind: "block", start: block.start || "", block })),
@@ -1320,6 +1373,7 @@ function TaskList({ tasks, blocks = [], db, currentUser, onStatus, onEdit, onSch
         const driver = db.drivers.find((item) => Number(item.id) === Number(task.driverId || currentUser?.currentDriverId));
         const driverPhone = phoneHref(driver?.phone);
         const contactPhone = phoneHref(task.phone);
+        const assignerPhone = phoneHref(taskAssignerUser(task, users)?.phone);
         return (
           <details className={`driverTaskCard ${task.status === "realizada" ? "completed" : ""} ${task.status === "en-trabajo" ? "active" : ""}`} key={task.id}>
             <summary className="driverTaskHeader">
@@ -1358,6 +1412,7 @@ function TaskList({ tasks, blocks = [], db, currentUser, onStatus, onEdit, onSch
               </section> : null}
               <div className="driverTaskActions">
                 {!isBlockTask ? <a className="iconBtn navigationBtn" href={taskGoogleMapsURL(task)} target="_blank" rel="noreferrer" aria-label="Abrir navegacion en Google Maps" title="Abrir navegacion en Google Maps"><MapPin size={19} /></a> : null}
+                {assignerPhone && normalizedRole(currentUser?.role) === "chofer" ? <a className="btn" href={assignerPhone}><Phone size={15} /> Llamar asignador</a> : null}
                 {contactPhone ? <a className="btn" href={contactPhone}><Phone size={15} /> Llamar contacto</a> : null}
                 {driverPhone && normalizedRole(currentUser?.role) !== "chofer" ? <a className="btn" href={driverPhone}><Phone size={15} /> Llamar chofer</a> : null}
                 {task.merchandisePdf?.data ? <a className="btn" href={task.merchandisePdf.data} download={task.merchandisePdf.name}>Abrir PDF</a> : null}
@@ -1405,7 +1460,7 @@ function TaskSchedule({ task, onSchedule }) {
     </form>
   );
 }
-function DailySchedule({ date, tasks, db, scheduleBlocks = [], showSummary = true, canCreate, canChangeStatus, currentUser, onFreeSlot, onStatus, onEdit, onDelete, onSave }) {
+function DailySchedule({ date, tasks, db, users = [], scheduleBlocks = [], showSummary = true, canCreate, canChangeStatus, currentUser, onFreeSlot, onStatus, onEdit, onDelete, onSave }) {
   const hours = Array.from({ length: 13 }, (_, index) => index + 7);
   const outside = tasks.filter((task) => {
     const hour = Number(String(task.start || "00:00").split(":")[0]);
@@ -1430,7 +1485,7 @@ function DailySchedule({ date, tasks, db, scheduleBlocks = [], showSummary = tru
                 {hourValue}
               </button>
               <div className="scheduleContent">
-                {hourTasks.length ? hourTasks.map((task) => <DailyTask key={task.id} task={task} db={db} canOperate={canCreate} canChangeStatus={canChangeStatus} currentUser={currentUser} onStatus={onStatus} onEdit={onEdit} onDelete={onDelete} onSave={onSave} />) : (
+                {hourTasks.length ? hourTasks.map((task) => <DailyTask key={task.id} task={task} db={db} users={users} canOperate={canCreate} canChangeStatus={canChangeStatus} currentUser={currentUser} onStatus={onStatus} onEdit={onEdit} onDelete={onDelete} onSave={onSave} />) : (
                   <button className={`freeSlot ${blocked ? "blockedSlot" : ""}`} disabled={!canCreate || Boolean(blocked)} onClick={() => onFreeSlot(hourValue)}>
                     <span>{blocked ? "Horario bloqueado" : "Horario libre"}</span>
                     <small>{blocked ? `${blocked.title || "Bloqueo operativo"} - ${blockTimeLabel(blocked)}` : "Agregar tarea"}</small>
@@ -1444,7 +1499,7 @@ function DailySchedule({ date, tasks, db, scheduleBlocks = [], showSummary = tru
           <div className="scheduleRow occupied" key={`outside-${task.id}`}>
             <span className="scheduleTime">{task.start}</span>
             <div className="scheduleContent">
-              <DailyTask task={task} db={db} canOperate={canCreate} canChangeStatus={canChangeStatus} currentUser={currentUser} onStatus={onStatus} onEdit={onEdit} onDelete={onDelete} onSave={onSave} outside />
+              <DailyTask task={task} db={db} users={users} canOperate={canCreate} canChangeStatus={canChangeStatus} currentUser={currentUser} onStatus={onStatus} onEdit={onEdit} onDelete={onDelete} onSave={onSave} outside />
             </div>
           </div>
         ))}
@@ -1453,7 +1508,7 @@ function DailySchedule({ date, tasks, db, scheduleBlocks = [], showSummary = tru
   );
 }
 
-function DailyTask({ task, db, canOperate, canChangeStatus, currentUser, onStatus, onEdit, onDelete, onSave, outside = false }) {
+function DailyTask({ task, db, users = [], canOperate, canChangeStatus, currentUser, onStatus, onEdit, onDelete, onSave, outside = false }) {
   const [editing, setEditing] = useState(false);
   const [saving, setSaving] = useState(false);
   const [draft, setDraft] = useState(null);
@@ -1468,6 +1523,7 @@ function DailyTask({ task, db, canOperate, canChangeStatus, currentUser, onStatu
   const driver = db?.drivers?.find((item) => Number(item.id) === Number(task.driverId || currentUser?.currentDriverId));
   const driverPhone = phoneHref(driver?.phone);
   const contactPhone = phoneHref(task.phone);
+  const assignerPhone = phoneHref(taskAssignerUser(task, users)?.phone);
   const metaItems = [
     task.distance ? ["Distancia", `${task.distance} km`] : null,
     task.merchandise ? ["Mercaderia", task.merchandise] : null,
@@ -1565,7 +1621,8 @@ function DailyTask({ task, db, canOperate, canChangeStatus, currentUser, onStatu
           ) : (
             <>
               {!isBlockTask ? <a className="btn primary" href={taskGoogleMapsURL(task)} target="_blank" rel="noreferrer">Abrir en Google Maps</a> : null}
-              {driverPhone ? <a className="btn" href={driverPhone}><Phone size={15} /> Llamar chofer</a> : null}
+              {assignerPhone && normalizedRole(currentUser?.role) === "chofer" ? <a className="btn" href={assignerPhone}><Phone size={15} /> Llamar asignador</a> : null}
+              {driverPhone && normalizedRole(currentUser?.role) !== "chofer" ? <a className="btn" href={driverPhone}><Phone size={15} /> Llamar chofer</a> : null}
               {contactPhone ? <a className="btn" href={contactPhone}><Phone size={15} /> Llamar contacto</a> : null}
               {task.merchandisePdf?.data ? <a className="btn" href={task.merchandisePdf.data} download={task.merchandisePdf.name}>Abrir PDF</a> : null}
               {canEdit ? <button className="btn" type="button" onClick={() => onEdit ? onEdit(task) : beginEditing()}><Edit3 size={15} /> Editar</button> : null}
@@ -1980,7 +2037,7 @@ function QuickAddresses({ onPick }) {
   );
 }
 
-function Records({ items, type, users = [], legalEntities = [], onSaveLegalEntities, onSave }) {
+function Records({ items, type, users = [], onSave }) {
   const [editing, setEditing] = useState(null);
   const isDriver = type === "driver";
   const isVehicle = type === "vehicle";
@@ -1997,7 +2054,6 @@ function Records({ items, type, users = [], legalEntities = [], onSaveLegalEntit
           </button>
         </div>
       ) : null}
-      {isVehicle ? <LegalEntitiesPanel entities={legalEntities} onSave={onSaveLegalEntities} /> : null}
       {editing && isDriver ? (
         <DriverForm
           driver={editing}
@@ -2081,7 +2137,21 @@ function VehicleDetailsCard({ item, onEdit }) {
   );
 }
 
-function LegalEntitiesPanel({ entities, onSave }) {
+function DocumentsPanel({ entities, canEdit, onSave }) {
+  return (
+    <>
+      <div className="toolbar">
+        <div>
+          <span className="eyebrow">DOCUMENTOS</span>
+          <h2>Razones sociales</h2>
+        </div>
+      </div>
+      <LegalEntitiesPanel entities={entities} canEdit={canEdit} onSave={onSave} />
+    </>
+  );
+}
+
+function LegalEntitiesPanel({ entities, canEdit = false, onSave }) {
   const [form, setForm] = useState(() => normalizedLegalEntities(entities));
   const [saving, setSaving] = useState(false);
 
@@ -2109,6 +2179,7 @@ function LegalEntitiesPanel({ entities, onSave }) {
 
   async function submit(event) {
     event.preventDefault();
+    if (!canEdit) return;
     setSaving(true);
     try {
       await onSave(form);
@@ -2122,32 +2193,37 @@ function LegalEntitiesPanel({ entities, onSave }) {
       <div className="formTitle legalEntitiesTitle">
         <div>
           <span className="eyebrow">DOCUMENTACION RECURRENTE</span>
-          <h2>Razones sociales</h2>
-          <p>Correos y constancias fiscales disponibles para el equipo administrativo.</p>
+          <h2>Constancias por razon social</h2>
+          <p>AFIP, IIBB y datos fiscales para tener siempre a mano.</p>
         </div>
-        <button className="btn primary" disabled={saving}>{saving ? "Guardando..." : "Guardar documentacion"}</button>
+        {canEdit ? <button className="btn primary" disabled={saving}>{saving ? "Guardando..." : "Guardar documentacion"}</button> : null}
       </div>
       <div className="legalEntitiesGrid">
         {form.map((entity, index) => (
-          <details className="legalEntity" key={entity.id || index}>
-            <summary className="legalEntityHeading">
-              <span className="legalEntityNumber">{index + 1}</span>
+          <details className="card recordDisclosure legalEntityCard" key={entity.id || index}>
+            <summary className="recordDisclosureSummary legalEntityHeading">
+              <span className="legalEntityNumber"><IdCard size={15} /></span>
               <span className="legalEntitySummaryText">
                 <strong>{entity.name || `Razon social ${index + 1}`}</strong>
-                <small>{entity.email || "Sin correo cargado"}</small>
+                <small>{entity.cuit || "CUIT sin cargar"}{entity.email ? ` - ${entity.email}` : ""}</small>
               </span>
-              <ChevronDown className="legalEntityChevron" size={19} aria-hidden="true" />
+              <ChevronDown className="recordDisclosureChevron" size={19} aria-hidden="true" />
             </summary>
-            <div className="legalEntityBody">
+            <div className="recordDisclosureBody legalEntityBody">
               <div className="legalEntityFields">
-                <div>
-                  <label>Razon social</label>
-                  <input value={entity.name || ""} onChange={(event) => updateEntity(index, { name: event.target.value })} placeholder={`Razon social ${index + 1}`} />
-                </div>
-                <div>
-                  <label>Correo</label>
-                  <input type="email" value={entity.email || ""} onChange={(event) => updateEntity(index, { email: event.target.value })} placeholder="documentacion@empresa.com" />
-                </div>
+                {canEdit ? (
+                  <>
+                    <div><label>Razon social</label><input value={entity.name || ""} onChange={(event) => updateEntity(index, { name: event.target.value })} /></div>
+                    <div><label>CUIT</label><input value={entity.cuit || ""} onChange={(event) => updateEntity(index, { cuit: event.target.value })} /></div>
+                    <div><label>Correo</label><input type="email" value={entity.email || ""} onChange={(event) => updateEntity(index, { email: event.target.value })} placeholder="documentacion@empresa.com" /></div>
+                  </>
+                ) : (
+                  <>
+                    <div><span>Razon social</span><b>{entity.name}</b></div>
+                    <div><span>CUIT</span><b>{entity.cuit}</b></div>
+                    {entity.email ? <div><span>Correo</span><b>{entity.email}</b></div> : null}
+                  </>
+                )}
               </div>
               <div className="legalEntityDocs">
                 {[{ key: "afip", label: "AFIP" }, { key: "iibb", label: "IIBB" }].map((documentType) => {
@@ -2156,9 +2232,9 @@ function LegalEntitiesPanel({ entities, onSave }) {
                     <div className="legalEntityDoc" key={documentType.key}>
                       <div><b>{documentType.label}</b><small>{document?.name || "Sin PDF cargado"}</small></div>
                       <div className="docActions">
-                        <label className="linkUpload">{document?.data ? "Reemplazar PDF" : "Subir PDF"}<input type="file" accept="application/pdf,.pdf" onChange={(event) => updateDocument(index, documentType.key, event.target.files?.[0])} /></label>
+                        {canEdit ? <label className="linkUpload">{document?.data ? "Reemplazar PDF" : "Subir PDF"}<input type="file" accept="application/pdf,.pdf" onChange={(event) => updateDocument(index, documentType.key, event.target.files?.[0])} /></label> : null}
                         {document?.data ? <a href={document.data} download={document.name}>Ver PDF</a> : null}
-                        {document?.data ? <button className="documentRemove" type="button" onClick={() => updateEntity(index, { [documentType.key]: null })}>Quitar</button> : null}
+                        {canEdit && document?.data ? <button className="documentRemove" type="button" onClick={() => updateEntity(index, { [documentType.key]: null })}>Quitar</button> : null}
                       </div>
                     </div>
                   );
@@ -2170,7 +2246,7 @@ function LegalEntitiesPanel({ entities, onSave }) {
         ))}
       </div>
       <div className="actions legalEntitiesActions">
-        <button className="btn primary" disabled={saving}>{saving ? "Guardando..." : "Guardar documentacion"}</button>
+        {canEdit ? <button className="btn primary" disabled={saving}>{saving ? "Guardando..." : "Guardar documentacion"}</button> : null}
       </div>
     </form>
   );
@@ -2388,6 +2464,108 @@ function DriverForm({ driver, linkedUser, onCancel, onSave }) {
         <button className="btn primary">Guardar chofer</button>
       </div>
     </form>
+  );
+}
+
+function ContactsPanel({ users = [], currentUser }) {
+  const contacts = users
+    .filter((user) => user.id !== currentUser?.id)
+    .filter((user) => user.phone || normalizedRole(user.role) !== "chofer")
+    .sort((a, b) => String(a.name || a.username).localeCompare(String(b.name || b.username)));
+  return (
+    <>
+      <div className="toolbar">
+        <div>
+          <span className="eyebrow">CONTACTOS</span>
+          <h2>Usuarios del equipo</h2>
+        </div>
+      </div>
+      <section className="grid contactsGrid">
+        {contacts.length ? contacts.map((contact) => {
+          const href = phoneHref(contact.phone);
+          return (
+            <article className="card contactCard" key={contact.id}>
+              <div>
+                <span className="eyebrow">{roleLabel(contact.role)}</span>
+                <h3>{contact.name || contact.username}</h3>
+                <p>{contact.phone || "Sin telefono cargado"}</p>
+              </div>
+              {href ? <a className="btn primary" href={href}><Phone size={15} /> Llamar</a> : <span className="status">Sin telefono</span>}
+            </article>
+          );
+        }) : <div className="empty">Todavia no hay contactos con telefono cargado.</div>}
+      </section>
+    </>
+  );
+}
+
+function ProfilePanel({ user, currentDriver, onSave }) {
+  const [form, setForm] = useState({
+    name: user.name || "",
+    phone: user.phone || currentDriver?.phone || "",
+    password: "",
+  });
+  const [saving, setSaving] = useState(false);
+
+  useEffect(() => {
+    setForm({
+      name: user.name || "",
+      phone: user.phone || currentDriver?.phone || "",
+      password: "",
+    });
+  }, [user, currentDriver]);
+
+  function update(name, value) {
+    setForm((current) => ({ ...current, [name]: value }));
+  }
+
+  async function submit(event) {
+    event.preventDefault();
+    if (form.password && form.password.length < 4) {
+      alert("La contrasena debe tener al menos 4 digitos.");
+      return;
+    }
+    setSaving(true);
+    try {
+      const saved = await onSave({
+        name: form.name.trim(),
+        phone: form.phone.trim(),
+        password: form.password,
+      });
+      if (saved) update("password", "");
+    } finally {
+      setSaving(false);
+    }
+  }
+
+  return (
+    <>
+      <div className="toolbar">
+        <div>
+          <span className="eyebrow">MI PERFIL</span>
+          <h2>Datos de acceso</h2>
+        </div>
+      </div>
+      <form className="card editorForm profileCard" onSubmit={submit}>
+        <div className="formTitle">
+          <div>
+            <span className="eyebrow">{roleLabel(user.role)}</span>
+            <h2>{user.username}</h2>
+          </div>
+        </div>
+        <div className="row">
+          <div><label>Nombre</label><input value={form.name} onChange={(event) => update("name", event.target.value)} required /></div>
+          <div><label>Telefono</label><input value={form.phone} onChange={(event) => update("phone", event.target.value)} inputMode="tel" /></div>
+        </div>
+        <div>
+          <label>Nueva contrasena <small>(opcional)</small></label>
+          <input type="password" value={form.password} onChange={(event) => update("password", event.target.value)} placeholder="Dejar vacio para no cambiar" />
+        </div>
+        <div className="actions">
+          <button className="btn primary" disabled={saving}>{saving ? "Guardando..." : "Guardar perfil"}</button>
+        </div>
+      </form>
+    </>
   );
 }
 

@@ -209,7 +209,7 @@ async function ensureDatabase(env) {
   await env.DB.batch([
     env.DB.prepare("CREATE TABLE IF NOT EXISTS app_state (key TEXT PRIMARY KEY, value TEXT NOT NULL, revision INTEGER NOT NULL DEFAULT 0, updated_at TEXT NOT NULL, updated_by TEXT)"),
     env.DB.prepare("CREATE INDEX IF NOT EXISTS idx_app_state_updated_at ON app_state(updated_at)"),
-    env.DB.prepare("CREATE TABLE IF NOT EXISTS app_users (id TEXT PRIMARY KEY, username TEXT UNIQUE, password_hash TEXT, email TEXT, name TEXT, role TEXT NOT NULL DEFAULT 'chofer', current_driver_id INTEGER, last_seen_at TEXT NOT NULL, created_at TEXT NOT NULL)"),
+    env.DB.prepare("CREATE TABLE IF NOT EXISTS app_users (id TEXT PRIMARY KEY, username TEXT UNIQUE, password_hash TEXT, email TEXT, name TEXT, phone TEXT, role TEXT NOT NULL DEFAULT 'chofer', current_driver_id INTEGER, last_seen_at TEXT NOT NULL, created_at TEXT NOT NULL)"),
     env.DB.prepare("CREATE TABLE IF NOT EXISTS app_sessions (token TEXT PRIMARY KEY, user_id TEXT NOT NULL, created_at TEXT NOT NULL, expires_at TEXT NOT NULL)"),
     env.DB.prepare("CREATE TABLE IF NOT EXISTS app_records (type TEXT NOT NULL, id TEXT NOT NULL, value TEXT NOT NULL, date TEXT, start TEXT, driver_id INTEGER, status TEXT, updated_at TEXT NOT NULL, PRIMARY KEY(type, id))"),
     env.DB.prepare("CREATE TABLE IF NOT EXISTS app_settings (key TEXT PRIMARY KEY, value TEXT NOT NULL, updated_at TEXT NOT NULL, updated_by TEXT)"),
@@ -231,10 +231,11 @@ async function ensureDatabase(env) {
   const userColumnNames = new Set((userColumns.results || []).map(column => column.name));
   if (!userColumnNames.has("username")) await env.DB.prepare("ALTER TABLE app_users ADD COLUMN username TEXT").run();
   if (!userColumnNames.has("password_hash")) await env.DB.prepare("ALTER TABLE app_users ADD COLUMN password_hash TEXT").run();
+  if (!userColumnNames.has("phone")) await env.DB.prepare("ALTER TABLE app_users ADD COLUMN phone TEXT").run();
   await env.DB.prepare("CREATE UNIQUE INDEX IF NOT EXISTS idx_app_users_username ON app_users(username)").run();
   for (const user of bootstrapUsers(env)) {
-    await env.DB.prepare("INSERT INTO app_users (id, username, password_hash, email, name, role, current_driver_id, last_seen_at, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?) ON CONFLICT(id) DO UPDATE SET username = excluded.username, password_hash = excluded.password_hash, email = excluded.email, name = excluded.name, role = excluded.role, current_driver_id = COALESCE(app_users.current_driver_id, excluded.current_driver_id)")
-      .bind(user.id, user.username, user.passwordHash, user.email, user.name, user.role, user.currentDriverId, new Date().toISOString(), new Date().toISOString())
+    await env.DB.prepare("INSERT INTO app_users (id, username, password_hash, email, name, phone, role, current_driver_id, last_seen_at, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?) ON CONFLICT(id) DO UPDATE SET username = excluded.username, password_hash = excluded.password_hash, email = excluded.email, name = excluded.name, role = excluded.role, current_driver_id = COALESCE(app_users.current_driver_id, excluded.current_driver_id)")
+      .bind(user.id, user.username, user.passwordHash, user.email, user.name, "", user.role, user.currentDriverId, new Date().toISOString(), new Date().toISOString())
       .run();
   }
   await env.DB.prepare("PRAGMA optimize").run();
@@ -257,7 +258,7 @@ async function currentUser(request, env) {
   const now = new Date().toISOString();
   const token = bearer(request);
   if (!token) return null;
-  const user = await env.DB.prepare("SELECT u.id, u.username, u.email, u.name, u.role, u.current_driver_id AS currentDriverId, s.expires_at AS sessionExpiresAt FROM app_sessions s JOIN app_users u ON u.id = s.user_id WHERE s.token = ? AND s.expires_at > ?").bind(token, now).first();
+  const user = await env.DB.prepare("SELECT u.id, u.username, u.email, u.name, u.phone, u.role, u.current_driver_id AS currentDriverId, s.expires_at AS sessionExpiresAt FROM app_sessions s JOIN app_users u ON u.id = s.user_id WHERE s.token = ? AND s.expires_at > ?").bind(token, now).first();
   if (user) {
     const renewAfter = Date.now() + 7 * 24 * 60 * 60 * 1000;
     if (new Date(user.sessionExpiresAt).getTime() < renewAfter) {
@@ -276,7 +277,7 @@ async function login(request, env) {
   const payload = await request.json().catch(() => ({}));
   const username = String(payload.username || "").trim().toLowerCase();
   const password = String(payload.password || "");
-  const user = await env.DB.prepare("SELECT id, username, email, name, role, current_driver_id AS currentDriverId, password_hash AS passwordHash FROM app_users WHERE lower(username) = ?").bind(username).first();
+  const user = await env.DB.prepare("SELECT id, username, email, name, phone, role, current_driver_id AS currentDriverId, password_hash AS passwordHash FROM app_users WHERE lower(username) = ?").bind(username).first();
   const hash = await sha256("tamiz-rutas:" + password);
   if (!user || hash !== user.passwordHash) return Response.json({ error: "Usuario o contraseña incorrectos" }, { status: 401 });
   const tokenBytes = new Uint8Array(32);
@@ -310,9 +311,7 @@ async function audit(env, user, action, entity, entityId, details = null) {
 async function session(request, env) {
   const user = await currentUser(request, env);
   if (!user) return Response.json({ error: "Se requiere inicio de sesion" }, { status: 401 });
-  const users = isAdmin(user)
-    ? (await env.DB.prepare("SELECT id, username, email, name, role, current_driver_id AS currentDriverId, last_seen_at AS lastSeenAt FROM app_users ORDER BY created_at ASC, last_seen_at DESC").all()).results
-    : [];
+  const users = (await env.DB.prepare("SELECT id, username, email, name, phone, role, current_driver_id AS currentDriverId, last_seen_at AS lastSeenAt FROM app_users ORDER BY created_at ASC, last_seen_at DESC").all()).results || [];
   return Response.json({ user, users }, { headers: { "cache-control": "no-store" } });
 }
 
@@ -332,8 +331,8 @@ async function createUser(request, env) {
   const id = crypto.randomUUID();
   const hash = await sha256("tamiz-rutas:" + password);
   const now = new Date().toISOString();
-  await env.DB.prepare("INSERT INTO app_users (id, username, password_hash, email, name, role, current_driver_id, last_seen_at, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)")
-    .bind(id, username, hash, "", name, role, currentDriverId, now, now)
+  await env.DB.prepare("INSERT INTO app_users (id, username, password_hash, email, name, phone, role, current_driver_id, last_seen_at, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)")
+    .bind(id, username, hash, "", name, "", role, currentDriverId, now, now)
     .run();
   await audit(env, actor, "create-user", "user", id, { username, role, currentDriverId });
   return session(request, env);
@@ -366,9 +365,24 @@ async function updateMe(request, env) {
   const user = await currentUser(request, env);
   if (!user) return Response.json({ error: "Se requiere inicio de sesion" }, { status: 401 });
   const payload = await request.json();
-  await env.DB.prepare("UPDATE app_users SET current_driver_id = ? WHERE id = ?").bind(payload.currentDriverId || null, user.id).run();
-  await audit(env, user, "update-preference", "user", user.id, { currentDriverId: payload.currentDriverId || null });
-  return session(request, env);
+  const name = String(payload.name || user.name || "").trim();
+  const phone = String(payload.phone || "").trim();
+  const password = String(payload.password || "");
+  if (!name) return Response.json({ error: "Nombre requerido" }, { status: 400 });
+  if (password) {
+    if (password.length < 4) return Response.json({ error: "La contrasena debe tener al menos 4 digitos" }, { status: 400 });
+    const hash = await sha256("tamiz-rutas:" + password);
+    await env.DB.prepare("UPDATE app_users SET name = ?, phone = ?, password_hash = ? WHERE id = ?").bind(name, phone, hash, user.id).run();
+  } else {
+    await env.DB.prepare("UPDATE app_users SET name = ?, phone = ? WHERE id = ?").bind(name, phone, user.id).run();
+  }
+  if (normalizedRole(user.role) === "chofer" && user.currentDriverId) {
+    const driver = await readRecord(env, "driver", user.currentDriverId);
+    if (driver) await storeRecord(env, "driver", { ...driver, name, phone, updatedAt: new Date().toISOString() });
+  }
+  const meta = await bumpRevision(env, user);
+  await audit(env, user, "update-profile", "user", user.id, { phoneChanged: phone !== (user.phone || ""), passwordChanged: Boolean(password), revision: meta.revision });
+  return stateResponse(env, { ...user, name, phone });
 }
 
 function recordMeta(type, record) {
@@ -564,9 +578,7 @@ async function stateResponse(env, user) {
   await migrateLegacyState(env);
   const data = await stateData(env);
   const meta = await revisionInfo(env);
-  const users = isAdmin(user)
-    ? (await env.DB.prepare("SELECT id, username, email, name, role, current_driver_id AS currentDriverId, last_seen_at AS lastSeenAt FROM app_users ORDER BY created_at ASC, last_seen_at DESC").all()).results
-    : [];
+  const users = (await env.DB.prepare("SELECT id, username, email, name, phone, role, current_driver_id AS currentDriverId, last_seen_at AS lastSeenAt FROM app_users ORDER BY created_at ASC, last_seen_at DESC").all()).results || [];
   return Response.json({ data, revision: meta.revision || 0, updatedAt: meta.updatedAt || null, updatedBy: meta.updatedBy || null, user, users }, { headers: { "cache-control": "no-store" } });
 }
 
@@ -780,6 +792,7 @@ async function saveLegalEntities(request, env) {
   const entities = payload.entities.map((entity, index) => ({
     id: String(entity?.id || ("razon-social-" + (index + 1))),
     name: String(entity?.name || "").trim(),
+    cuit: String(entity?.cuit || "").trim(),
     email: String(entity?.email || "").trim(),
     afip: entity?.afip || null,
     iibb: entity?.iibb || null,
