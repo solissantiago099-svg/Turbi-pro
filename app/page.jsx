@@ -141,6 +141,20 @@ function defaultVehicleDocs() {
   ];
 }
 
+function defaultLegalEntities() {
+  return Array.from({ length: 4 }, (_, index) => ({
+    id: `razon-social-${index + 1}`,
+    name: "",
+    email: "",
+    afip: null,
+    iibb: null,
+  }));
+}
+
+function normalizedLegalEntities(entities) {
+  const current = Array.isArray(entities) ? entities : [];
+  return defaultLegalEntities().map((fallback, index) => ({ ...fallback, ...(current[index] || {}) }));
+}
 function fileToDataURL(file) {
   return new Promise((resolve, reject) => {
     const reader = new FileReader();
@@ -202,7 +216,7 @@ const seed = {
     maintenance: [{ year: 2026, km: 58000, title: "Cambio de aceite" }],
     plan: [{ title: "Cambio de aceite", nextKm: 68000 }, { title: "Service general", nextKm: 70000 }],
   }],
-  settings: { currentDriverId: 1, scheduleBlocks: [] },
+  settings: { currentDriverId: 1, scheduleBlocks: [], legalEntities: defaultLegalEntities() },
 };
 
 const statusText = {
@@ -999,6 +1013,16 @@ export default function Home() {
     await savePartial("/api/vehicles", exists ? "PUT" : "POST", nextVehicle, nextDb, exists ? "Camioneta actualizada" : "Camioneta creada");
   }
 
+  async function saveLegalEntities(nextEntities) {
+    const nextDb = {
+      ...db,
+      settings: {
+        ...(db.settings || {}),
+        legalEntities: nextEntities,
+      },
+    };
+    await savePartial("/api/legal-entities", "PUT", { entities: nextEntities }, nextDb, "Documentacion recurrente actualizada");
+  }
   async function saveScheduleBlocks(nextBlocks) {
     const nextDb = {
       ...db,
@@ -1197,7 +1221,7 @@ export default function Home() {
             />
           )}
 
-          {view === "vehiculos" && <Records items={db.vehicles} type="vehicle" onSave={saveVehicle} />}
+          {view === "vehiculos" && <Records items={db.vehicles} type="vehicle" legalEntities={db.settings?.legalEntities} onSaveLegalEntities={saveLegalEntities} onSave={saveVehicle} />}
           {view === "choferes" && <Records items={db.drivers} type="driver" users={users} onSave={saveDriver} />}
           {view === "configuracion" && <SettingsPanel user={user} users={users} db={db} token={token} revision={revision} onUsers={setUsers} onUser={setUser} onNotify={notify} />}
         </div>
@@ -1956,7 +1980,7 @@ function QuickAddresses({ onPick }) {
   );
 }
 
-function Records({ items, type, users = [], onSave }) {
+function Records({ items, type, users = [], legalEntities = [], onSaveLegalEntities, onSave }) {
   const [editing, setEditing] = useState(null);
   const isDriver = type === "driver";
   const isVehicle = type === "vehicle";
@@ -1973,6 +1997,7 @@ function Records({ items, type, users = [], onSave }) {
           </button>
         </div>
       ) : null}
+      {isVehicle ? <LegalEntitiesPanel entities={legalEntities} onSave={onSaveLegalEntities} /> : null}
       {editing && isDriver ? (
         <DriverForm
           driver={editing}
@@ -1995,19 +2020,19 @@ function Records({ items, type, users = [], onSave }) {
         />
       ) : null}
       <section className="grid">
-        {items.map((item) => (
+        {items.map((item) => isVehicle ? (
+          <VehicleDetailsCard item={item} key={item.id} onEdit={() => setEditing(item)} />
+        ) : (
           <article className="card record" key={item.id}>
             <div>
               <h3>{item.name}</h3>
-              <p>{type === "vehicle" ? `${item.brand || ""} ${item.model || ""} - ${item.plate || ""}` : `${item.phone || ""} - Registro ${item.license || ""}`}</p>
-              {isDriver && item.docs?.length ? <small>{item.docs.length} documentos adjuntos</small> : null}
-              {isDriver ? <small>{users.find((user) => Number(user.currentDriverId) === Number(item.id))?.username ? `Usuario: ${users.find((user) => Number(user.currentDriverId) === Number(item.id)).username}` : "Sin usuario vinculado"}</small> : null}
-              {isVehicle ? <small>{(item.docs?.length || defaultVehicleDocs().length)} documentos legales</small> : null}
+              <p>{`${item.phone || ""} - Registro ${item.license || ""}`}</p>
+              {item.docs?.length ? <small>{item.docs.length} documentos adjuntos</small> : null}
+              <small>{users.find((user) => Number(user.currentDriverId) === Number(item.id))?.username ? `Usuario: ${users.find((user) => Number(user.currentDriverId) === Number(item.id)).username}` : "Sin usuario vinculado"}</small>
             </div>
             <div className="recordActions">
               <span className="status">{item.status || "activo"}</span>
-              {isDriver ? <button className="btn" onClick={() => setEditing(item)}><Edit3 size={15} /> Editar</button> : null}
-              {isVehicle ? <button className="btn" onClick={() => setEditing(item)}><Edit3 size={15} /> Editar</button> : null}
+              <button className="btn" onClick={() => setEditing(item)}><Edit3 size={15} /> Editar</button>
             </div>
           </article>
         ))}
@@ -2016,6 +2041,140 @@ function Records({ items, type, users = [], onSave }) {
   );
 }
 
+function VehicleDetailsCard({ item, onEdit }) {
+  const documents = item.docs?.length ? item.docs : defaultVehicleDocs();
+  return (
+    <details className="card recordDisclosure">
+      <summary className="recordDisclosureSummary">
+        <div>
+          <h3>{item.name}</h3>
+          <p>{`${item.brand || ""} ${item.model || ""} - ${item.plate || ""}`}</p>
+          <small>{documents.length} documentos legales</small>
+        </div>
+        <div className="recordActions">
+          <span className="status">{item.status || "activo"}</span>
+          <ChevronDown className="recordDisclosureChevron" size={19} aria-hidden="true" />
+        </div>
+      </summary>
+      <div className="recordDisclosureBody">
+        <div className="vehicleDetailsGrid">
+          <div><span>Marca y modelo</span><b>{`${item.brand || "Sin marca"} ${item.model || ""}`}</b></div>
+          <div><span>Patente</span><b>{item.plate || "Sin patente"}</b></div>
+          <div><span>Kilometraje</span><b>{item.km ? `${Number(item.km).toLocaleString("es-AR")} km` : "Sin kilometraje"}</b></div>
+          <div><span>Combustible</span><b>{item.fuel || "Sin especificar"}</b></div>
+          <div><span>Estado general</span><b>{item.health !== undefined ? `${item.health}%` : "Sin informar"}</b></div>
+        </div>
+        <div className="vehicleDocumentsPreview">
+          <span className="eyebrow">DOCUMENTACION LEGAL</span>
+          {documents.map((doc) => (
+            <div className="vehicleDocumentPreview" key={doc.id || doc.name}>
+              <div><b>{doc.name}</b><small>{doc.expiry ? `Vence ${new Date(`${doc.expiry}T12:00:00`).toLocaleDateString("es-AR")}` : "Sin vencimiento"}</small></div>
+              {doc.file?.data ? <a href={doc.file.data} download={doc.file.name}>Ver PDF</a> : <span>Sin PDF</span>}
+            </div>
+          ))}
+        </div>
+        <div className="actions">
+          <button className="btn" type="button" onClick={onEdit}><Edit3 size={15} /> Editar vehiculo</button>
+        </div>
+      </div>
+    </details>
+  );
+}
+
+function LegalEntitiesPanel({ entities, onSave }) {
+  const [form, setForm] = useState(() => normalizedLegalEntities(entities));
+  const [saving, setSaving] = useState(false);
+
+  useEffect(() => {
+    setForm(normalizedLegalEntities(entities));
+  }, [entities]);
+
+  function updateEntity(index, patch) {
+    setForm((current) => current.map((entity, itemIndex) => (itemIndex === index ? { ...entity, ...patch } : entity)));
+  }
+
+  async function updateDocument(index, key, file) {
+    if (!file) return;
+    if (file.type !== "application/pdf") {
+      alert("La documentacion de la razon social debe ser PDF.");
+      return;
+    }
+    if (file.size > 1500000) {
+      alert("El PDF supera el maximo de 1,5 MB.");
+      return;
+    }
+    const data = await fileToDataURL(file);
+    updateEntity(index, { [key]: { name: file.name, size: file.size, data, uploadedAt: new Date().toISOString() } });
+  }
+
+  async function submit(event) {
+    event.preventDefault();
+    setSaving(true);
+    try {
+      await onSave(form);
+    } finally {
+      setSaving(false);
+    }
+  }
+
+  return (
+    <form className="card legalEntitiesCard" onSubmit={submit}>
+      <div className="formTitle legalEntitiesTitle">
+        <div>
+          <span className="eyebrow">DOCUMENTACION RECURRENTE</span>
+          <h2>Razones sociales</h2>
+          <p>Correos y constancias fiscales disponibles para el equipo administrativo.</p>
+        </div>
+        <button className="btn primary" disabled={saving}>{saving ? "Guardando..." : "Guardar documentacion"}</button>
+      </div>
+      <div className="legalEntitiesGrid">
+        {form.map((entity, index) => (
+          <details className="legalEntity" key={entity.id || index}>
+            <summary className="legalEntityHeading">
+              <span className="legalEntityNumber">{index + 1}</span>
+              <span className="legalEntitySummaryText">
+                <strong>{entity.name || `Razon social ${index + 1}`}</strong>
+                <small>{entity.email || "Sin correo cargado"}</small>
+              </span>
+              <ChevronDown className="legalEntityChevron" size={19} aria-hidden="true" />
+            </summary>
+            <div className="legalEntityBody">
+              <div className="legalEntityFields">
+                <div>
+                  <label>Razon social</label>
+                  <input value={entity.name || ""} onChange={(event) => updateEntity(index, { name: event.target.value })} placeholder={`Razon social ${index + 1}`} />
+                </div>
+                <div>
+                  <label>Correo</label>
+                  <input type="email" value={entity.email || ""} onChange={(event) => updateEntity(index, { email: event.target.value })} placeholder="documentacion@empresa.com" />
+                </div>
+              </div>
+              <div className="legalEntityDocs">
+                {[{ key: "afip", label: "AFIP" }, { key: "iibb", label: "IIBB" }].map((documentType) => {
+                  const document = entity[documentType.key];
+                  return (
+                    <div className="legalEntityDoc" key={documentType.key}>
+                      <div><b>{documentType.label}</b><small>{document?.name || "Sin PDF cargado"}</small></div>
+                      <div className="docActions">
+                        <label className="linkUpload">{document?.data ? "Reemplazar PDF" : "Subir PDF"}<input type="file" accept="application/pdf,.pdf" onChange={(event) => updateDocument(index, documentType.key, event.target.files?.[0])} /></label>
+                        {document?.data ? <a href={document.data} download={document.name}>Ver PDF</a> : null}
+                        {document?.data ? <button className="documentRemove" type="button" onClick={() => updateEntity(index, { [documentType.key]: null })}>Quitar</button> : null}
+                      </div>
+                    </div>
+                  );
+                })}
+              </div>
+              {entity.email ? <a className="legalEntityEmail" href={`mailto:${entity.email}`}>Escribir a {entity.email}</a> : null}
+            </div>
+          </details>
+        ))}
+      </div>
+      <div className="actions legalEntitiesActions">
+        <button className="btn primary" disabled={saving}>{saving ? "Guardando..." : "Guardar documentacion"}</button>
+      </div>
+    </form>
+  );
+}
 function VehicleForm({ vehicle, onCancel, onSave }) {
   const [form, setForm] = useState({
     name: vehicle.name || "",

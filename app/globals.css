@@ -1397,6 +1397,104 @@ textarea {
   justify-content: flex-end;
 }
 
+.recordDisclosure {
+  padding: 0;
+  overflow: hidden;
+}
+
+.recordDisclosureSummary {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 16px;
+  list-style: none;
+  cursor: pointer;
+  user-select: none;
+}
+
+.recordDisclosureSummary::-webkit-details-marker,
+.legalEntityHeading::-webkit-details-marker {
+  display: none;
+}
+
+.recordDisclosureSummary h3,
+.recordDisclosureSummary p {
+  margin: 0;
+}
+
+.recordDisclosureSummary p,
+.recordDisclosureSummary small {
+  color: var(--muted);
+}
+
+.recordDisclosureChevron,
+.legalEntityChevron {
+  flex: 0 0 auto;
+  color: var(--green);
+  transition: transform 0.18s ease;
+}
+
+.recordDisclosure[open] .recordDisclosureChevron,
+.legalEntity[open] .legalEntityChevron {
+  transform: rotate(180deg);
+}
+
+.recordDisclosureBody {
+  display: grid;
+  gap: 14px;
+  border-top: 1px solid var(--line);
+  padding: 16px;
+  background: #fbf7ee;
+}
+
+.vehicleDetailsGrid {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 10px;
+}
+
+.vehicleDetailsGrid > div {
+  display: grid;
+  gap: 4px;
+  border: 1px solid #e5dccf;
+  border-radius: 8px;
+  padding: 11px;
+  background: #fffdf8;
+}
+
+.vehicleDetailsGrid span,
+.vehicleDocumentPreview small,
+.vehicleDocumentPreview > span {
+  color: var(--muted);
+  font-size: 12px;
+}
+
+.vehicleDocumentsPreview {
+  display: grid;
+  gap: 8px;
+}
+
+.vehicleDocumentPreview {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  border-radius: 8px;
+  padding: 10px;
+  background: #fffdf8;
+}
+
+.vehicleDocumentPreview > div {
+  display: grid;
+  gap: 3px;
+}
+
+.vehicleDocumentPreview a {
+  color: var(--plum);
+  font-size: 12px;
+  font-weight: 900;
+}
 .editorForm {
   margin-bottom: 14px;
   box-shadow: var(--shadow-md);
@@ -1462,6 +1560,158 @@ textarea {
   font-size: 16px;
 }
 
+.legalEntitiesCard {
+  margin-bottom: 18px;
+}
+
+.legalEntitiesTitle p {
+  margin: 6px 0 0;
+  color: var(--muted);
+}
+
+.legalEntitiesGrid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 12px;
+  margin-top: 16px;
+}
+
+.legalEntity {
+  display: grid;
+  gap: 12px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  padding: 14px;
+  background: #fbf7ee;
+}
+
+.legalEntityHeading {
+  display: flex;
+  align-items: center;
+  gap: 9px;
+  color: var(--ink);
+}
+
+.legalEntityHeading {
+  list-style: none;
+  cursor: pointer;
+  user-select: none;
+}
+
+.legalEntitySummaryText {
+  display: grid;
+  flex: 1 1 auto;
+  gap: 3px;
+  min-width: 0;
+}
+
+.legalEntitySummaryText strong,
+.legalEntitySummaryText small {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.legalEntitySummaryText small {
+  color: var(--muted);
+}
+
+.legalEntityBody {
+  display: grid;
+  gap: 12px;
+  border-top: 1px solid var(--line);
+  padding-top: 12px;
+}
+.legalEntityNumber {
+  display: grid;
+  place-items: center;
+  width: 28px;
+  height: 28px;
+  border-radius: 50%;
+  background: var(--green);
+  color: #fffdf8;
+  font-family: var(--font-mono);
+  font-size: 12px;
+  font-weight: 900;
+}
+
+.legalEntityFields,
+.legalEntityDocs {
+  display: grid;
+  gap: 10px;
+}
+
+.legalEntityFields {
+  grid-template-columns: 1fr;
+}
+
+.legalEntityDocs {
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+}
+
+.legalEntityNameInput {
+  min-width: 0;
+  border: 0;
+  border-bottom: 1px solid transparent;
+  border-radius: 0;
+  padding: 5px 3px;
+  background: transparent;
+  color: var(--ink);
+  font-family: var(--font-display);
+  font-size: 17px;
+  font-weight: 700;
+}
+
+.legalEntityNameInput:hover,
+.legalEntityNameInput:focus {
+  border-bottom-color: var(--green);
+  background: #fffdf8;
+}
+
+.legalEntityDoc {
+  min-width: 0;
+  border: 1px solid #e5dccf;
+  border-radius: 8px;
+  padding: 10px;
+  background: #fffdf8;
+}
+
+.legalEntityDoc > div:first-child {
+  display: grid;
+  gap: 3px;
+}
+
+.legalEntityDoc small {
+  overflow: hidden;
+  color: var(--muted);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.documentRemove {
+  border: 0;
+  padding: 0;
+  background: transparent;
+  color: var(--danger);
+  font-size: 12px;
+  font-weight: 900;
+  cursor: pointer;
+}
+
+.legalEntityEmail {
+  width: max-content;
+  max-width: 100%;
+  overflow: hidden;
+  color: var(--plum);
+  font-size: 13px;
+  font-weight: 800;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.legalEntitiesActions {
+  display: none;
+}
 .vehicleDocs {
   display: grid;
   gap: 10px;
@@ -1823,6 +2073,34 @@ textarea {
   .agendaStickyNav .week {
     margin-inline: -12px;
     margin-bottom: 7px;
+  }
+  .recordDisclosureSummary {
+    align-items: flex-start;
+  }
+
+  .vehicleDetailsGrid {
+    grid-template-columns: 1fr;
+  }
+
+  .vehicleDocumentPreview {
+    align-items: flex-start;
+  }
+  .legalEntitiesTitle {
+    align-items: flex-start;
+  }
+
+  .legalEntitiesTitle > .btn {
+    display: none;
+  }
+
+  .legalEntitiesGrid,
+  .legalEntityFields,
+  .legalEntityDocs {
+    grid-template-columns: 1fr;
+  }
+
+  .legalEntitiesActions {
+    display: flex;
   }
   .week {
     display: flex;

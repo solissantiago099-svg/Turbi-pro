@@ -768,6 +768,28 @@ async function saveRecordEndpoint(request, env, type) {
   return stateResponse(env, user);
 }
 
+async function saveLegalEntities(request, env) {
+  const user = await currentUser(request, env);
+  if (!user) return Response.json({ error: "Se requiere inicio de sesion" }, { status: 401 });
+  if (!isAdmin(user)) return Response.json({ error: "No autorizado" }, { status: 403 });
+  await migrateLegacyState(env);
+  const payload = await request.json();
+  if (!Array.isArray(payload.entities) || payload.entities.length !== 4) {
+    return Response.json({ error: "Deben guardarse las cuatro razones sociales." }, { status: 400 });
+  }
+  const entities = payload.entities.map((entity, index) => ({
+    id: String(entity?.id || ("razon-social-" + (index + 1))),
+    name: String(entity?.name || "").trim(),
+    email: String(entity?.email || "").trim(),
+    afip: entity?.afip || null,
+    iibb: entity?.iibb || null,
+  }));
+  const settings = await readSettings(env);
+  await writeSettings(env, { ...settings, legalEntities: entities }, user);
+  const meta = await bumpRevision(env, user);
+  await audit(env, user, "save-legal-entities", "settings", "default", { revision: meta.revision });
+  return stateResponse(env, user);
+}
 async function saveScheduleBlocks(request, env) {
   const user = await currentUser(request, env);
   if (!user) return Response.json({ error: "Se requiere inicio de sesion" }, { status: 401 });
@@ -806,6 +828,7 @@ export default {
     if (url.pathname === "/api/tasks/schedule" && request.method === "PUT") return scheduleTaskRecord(request, env);
     if (url.pathname === "/api/drivers" && ["POST", "PUT"].includes(request.method)) return saveRecordEndpoint(request, env, "driver");
     if (url.pathname === "/api/vehicles" && ["POST", "PUT"].includes(request.method)) return saveRecordEndpoint(request, env, "vehicle");
+    if (url.pathname === "/api/legal-entities" && request.method === "PUT") return saveLegalEntities(request, env);
     if (url.pathname === "/api/schedule-blocks" && request.method === "PUT") return saveScheduleBlocks(request, env);
     return assetResponse(url.pathname) || new Response("404 - Archivo no encontrado", { status: 404, headers: { "content-type": "text/plain; charset=utf-8" } });
   },
