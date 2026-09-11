@@ -1056,7 +1056,7 @@ export default function Home() {
     if (!token) return;
     setPushState("saving");
     try {
-      if (isLocalMode()) {
+      if (isLocalPreview()) {
         if (Notification.permission === "granted") {
           new Notification("Notificacion de prueba", { body: "Si ves esto, los avisos de TAMIZ RUTAS estan funcionando.", icon: "/icons/icon-192.png" });
         }
