@@ -513,6 +513,20 @@ function mergePushSubscriptions(...sources) {
   return [...byEndpoint.values()];
 }
 
+function wait(ms) {
+  return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
+async function readPushSubscriptionSources(env) {
+  const settingsSubscriptions = normalizedPushSubscriptions(await readSettingKey(env, "push_subscriptions", []));
+  const recordSubscriptions = normalizedPushSubscriptions(await readRecords(env, "push_subscription").catch(() => []));
+  return {
+    settingsSubscriptions,
+    recordSubscriptions,
+    subscriptions: mergePushSubscriptions(recordSubscriptions, settingsSubscriptions),
+  };
+}
+
 async function writePushSubscriptions(env, subscriptions, user) {
   const normalized = mergePushSubscriptions(subscriptions).slice(-250);
   await writeSettingKey(env, "push_subscriptions", normalized, user);
@@ -524,13 +538,11 @@ async function writePushSubscriptions(env, subscriptions, user) {
 }
 
 async function readPushSubscriptions(env) {
-  const settingsSubscriptions = normalizedPushSubscriptions(await readSettingKey(env, "push_subscriptions", []));
-  const recordSubscriptions = normalizedPushSubscriptions(await readRecords(env, "push_subscription").catch(() => []));
-  const merged = mergePushSubscriptions(recordSubscriptions, settingsSubscriptions);
+  const { settingsSubscriptions, recordSubscriptions, subscriptions } = await readPushSubscriptionSources(env);
   if (settingsSubscriptions.length && recordSubscriptions.length < settingsSubscriptions.length) {
-    await writePushSubscriptions(env, merged, null).catch(() => null);
+    await writePushSubscriptions(env, subscriptions, null).catch(() => null);
   }
-  return merged;
+  return subscriptions;
 }
 
 async function savePushSubscription(request, env) {
@@ -692,7 +704,18 @@ async function listPushDevices(request, env) {
 }
 
 async function notifyTaskAssignment(env, task, user, source = "task") {
-  const subscriptions = await readPushSubscriptions(env);
+  let subscriptionSources = await readPushSubscriptionSources(env);
+  let subscriptions = subscriptionSources.subscriptions;
+  let retried = false;
+  if (!subscriptions.length) {
+    retried = true;
+    await wait(250);
+    subscriptionSources = await readPushSubscriptionSources(env);
+    subscriptions = subscriptionSources.subscriptions;
+  }
+  if (subscriptionSources.settingsSubscriptions.length && subscriptionSources.recordSubscriptions.length < subscriptionSources.settingsSubscriptions.length) {
+    await writePushSubscriptions(env, subscriptions, null).catch(() => null);
+  }
   const targets = taskNotificationTargets(subscriptions, task);
   const sentAt = new Date().toISOString();
   const result = await sendPushToTargets(env, targets, {
@@ -712,6 +735,9 @@ async function notifyTaskAssignment(env, task, user, source = "task") {
     subscriptions: subscriptions.length,
     endpoints: subscriptions.filter((item) => item?.subscription?.endpoint).length,
     targets: targets.length,
+    settingsSubscriptions: subscriptionSources.settingsSubscriptions.length,
+    recordSubscriptions: subscriptionSources.recordSubscriptions.length,
+    retried,
     error: result?.error || "",
   }, user);
   await audit(env, user, "notify-task", "task", String(task.id || ""), result || { total: 0, sent: 0, removed: 0 });

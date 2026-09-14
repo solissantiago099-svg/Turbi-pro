@@ -2781,7 +2781,16 @@ function SettingsPanel({ user, users, db, token, revision, onUsers, onUser, onNo
             </div>
           ) : null}
           {lastTaskNotification ? (
-            <p className="muted smallText">Ultima tarea: {lastTaskNotification.sent || 0}/{lastTaskNotification.total || 0} avisos enviados{lastTaskNotification.title ? ` - ${lastTaskNotification.title}` : ""}</p>
+            <div className="pushLastTask">
+              <p className="muted smallText">Ultima tarea: {lastTaskNotification.sent || 0}/{lastTaskNotification.total || 0} avisos enviados{lastTaskNotification.title ? ` - ${lastTaskNotification.title}` : ""}</p>
+              <small>
+                origen: {lastTaskNotification.source || "-"} · subs: {lastTaskNotification.subscriptions ?? "-"} · endpoints: {lastTaskNotification.endpoints ?? "-"} · targets: {lastTaskNotification.targets ?? "-"}
+                {lastTaskNotification.settingsSubscriptions !== undefined ? ` · settings: ${lastTaskNotification.settingsSubscriptions}` : ""}
+                {lastTaskNotification.recordSubscriptions !== undefined ? ` · registros: ${lastTaskNotification.recordSubscriptions}` : ""}
+                {lastTaskNotification.retried ? " · reintento" : ""}
+                {lastTaskNotification.error ? ` · error: ${lastTaskNotification.error}` : ""}
+              </small>
+            </div>
           ) : null}
         </article>
         {users.map((item) => (
