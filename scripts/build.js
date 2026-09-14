@@ -499,8 +499,38 @@ async function vapidToken(env, audience) {
   return unsigned + "." + base64UrlBytes(signature);
 }
 
+function normalizedPushSubscriptions(value) {
+  return Array.isArray(value) ? value.filter((item) => item?.subscription?.endpoint) : [];
+}
+
+function mergePushSubscriptions(...sources) {
+  const byEndpoint = new Map();
+  for (const source of sources) {
+    for (const item of normalizedPushSubscriptions(source)) {
+      byEndpoint.set(item.subscription.endpoint, item);
+    }
+  }
+  return [...byEndpoint.values()];
+}
+
+async function writePushSubscriptions(env, subscriptions, user) {
+  const normalized = mergePushSubscriptions(subscriptions).slice(-250);
+  await writeSettingKey(env, "push_subscriptions", normalized, user);
+  await env.DB.prepare("DELETE FROM app_records WHERE type = ?").bind("push_subscription").run();
+  for (const item of normalized) {
+    await storeRecord(env, "push_subscription", { ...item, id: item.id || crypto.randomUUID() });
+  }
+  return normalized;
+}
+
 async function readPushSubscriptions(env) {
-  return await readSettingKey(env, "push_subscriptions", []);
+  const settingsSubscriptions = normalizedPushSubscriptions(await readSettingKey(env, "push_subscriptions", []));
+  const recordSubscriptions = normalizedPushSubscriptions(await readRecords(env, "push_subscription").catch(() => []));
+  const merged = mergePushSubscriptions(recordSubscriptions, settingsSubscriptions);
+  if (settingsSubscriptions.length && recordSubscriptions.length < settingsSubscriptions.length) {
+    await writePushSubscriptions(env, merged, null).catch(() => null);
+  }
+  return merged;
 }
 
 async function savePushSubscription(request, env) {
@@ -531,7 +561,7 @@ async function savePushSubscription(request, env) {
     lastPushStatus: previous?.lastPushStatus || null,
     lastPushError: previous?.lastPushError || "",
   });
-  await writeSettingKey(env, "push_subscriptions", next.slice(-250), user);
+  await writePushSubscriptions(env, next, user);
   await audit(env, user, "subscribe-push", "user", user.id);
   return Response.json({ ok: true }, { headers: { "cache-control": "no-store" } });
 }
@@ -589,8 +619,8 @@ async function sendPush(subscription, env, payload) {
 }
 
 async function sendPushToTargets(env, targets, payload, user) {
-  if (!env.TAMIZ_VAPID_PRIVATE_JWK) return;
-  if (!targets.length) return;
+  if (!env.TAMIZ_VAPID_PRIVATE_JWK) return { total: targets.length, sent: 0, removed: 0, error: "vapid faltante" };
+  if (!targets.length) return { total: 0, sent: 0, removed: 0 };
   const results = await Promise.allSettled(targets.map((item) => sendPush(item.subscription, env, payload)));
   const now = new Date().toISOString();
   const goneEndpoints = new Set(results.map((result, index) => result.status === "fulfilled" && result.value.gone ? targets[index].subscription.endpoint : null).filter(Boolean));
@@ -613,7 +643,7 @@ async function sendPushToTargets(env, targets, payload, user) {
         lastPushError: result.ok ? "" : (result.error || ("HTTP " + (result.status || 0))),
       };
     });
-  await writeSettingKey(env, "push_subscriptions", updated, user);
+  await writePushSubscriptions(env, updated, user);
   return { total: targets.length, sent: results.filter((result) => result.status === "fulfilled" && result.value.ok).length, removed: goneEndpoints.size };
 }
 
@@ -661,7 +691,7 @@ async function listPushDevices(request, env) {
   return Response.json({ devices: pushDevicesResponse(subscriptions), lastTaskNotification }, { headers: { "cache-control": "no-store" } });
 }
 
-async function notifyTaskAssignment(env, task, user) {
+async function notifyTaskAssignment(env, task, user, source = "task") {
   const subscriptions = await readPushSubscriptions(env);
   const targets = taskNotificationTargets(subscriptions, task);
   const sentAt = new Date().toISOString();
@@ -678,6 +708,11 @@ async function notifyTaskAssignment(env, task, user) {
     total: result?.total || 0,
     sent: result?.sent || 0,
     removed: result?.removed || 0,
+    source,
+    subscriptions: subscriptions.length,
+    endpoints: subscriptions.filter((item) => item?.subscription?.endpoint).length,
+    targets: targets.length,
+    error: result?.error || "",
   }, user);
   await audit(env, user, "notify-task", "task", String(task.id || ""), result || { total: 0, sent: 0, removed: 0 });
   return result;
@@ -856,7 +891,7 @@ async function writeState(request, env) {
   await replaceStateTables(env, nextData, user);
   const meta = await bumpRevision(env, user);
   await audit(env, user, payload.action || "save-state", "app_state", "default", { revision: meta.revision });
-  for (const task of createdTasks) await notifyTaskAssignment(env, task, user).catch(() => null);
+  for (const task of createdTasks) await notifyTaskAssignment(env, task, user, "state").catch((error) => recordTaskNotificationError(env, task, user, error));
   return stateResponse(env, user);
 }
 
@@ -915,7 +950,7 @@ async function saveTask(request, env, mode, ctx) {
   await audit(env, user, mode === "create" ? "create-task" : "update-task", "task", String(nextTask.id), { revision: meta.revision });
   const shouldNotify = mode === "create" || (nextTask.driverId && Number(existing?.driverId || 0) !== Number(nextTask.driverId));
   if (shouldNotify) {
-    await notifyTaskAssignment(env, nextTask, user).catch((error) => recordTaskNotificationError(env, nextTask, user, error));
+    await notifyTaskAssignment(env, nextTask, user, mode === "create" ? "create-task" : "edit-task").catch((error) => recordTaskNotificationError(env, nextTask, user, error));
   }
   return stateResponse(env, user);
 }
@@ -953,7 +988,7 @@ async function scheduleTaskRecord(request, env) {
   await storeRecord(env, "task", nextTask);
   const meta = await bumpRevision(env, user);
   await audit(env, user, "schedule-task", "task", String(task.id), { revision: meta.revision });
-  await notifyTaskAssignment(env, nextTask, user).catch((error) => recordTaskNotificationError(env, nextTask, user, error));
+  await notifyTaskAssignment(env, nextTask, user, "schedule-task").catch((error) => recordTaskNotificationError(env, nextTask, user, error));
   return stateResponse(env, user);
 }
 
