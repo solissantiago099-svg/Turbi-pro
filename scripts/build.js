@@ -704,7 +704,8 @@ async function taskPushNotification(request, env) {
   if (!user) return Response.json({ error: "Se requiere inicio de sesion" }, { status: 401 });
   if (!env.TAMIZ_VAPID_PRIVATE_JWK) return Response.json({ error: "Avisos no configurados en servidor" }, { status: 503 });
   const payload = await request.json().catch(() => ({}));
-  const task = payload?.id ? await readRecord(env, "task", payload.id) : payload?.task;
+  const storedTask = payload?.id ? await readRecord(env, "task", payload.id) : null;
+  const task = storedTask || payload?.task;
   if (!task) return Response.json({ error: "Tarea inexistente" }, { status: 404 });
   const result = await notifyTaskAssignment(env, task, user);
   return Response.json(result || { total: 0, sent: 0, removed: 0 }, { headers: { "cache-control": "no-store" } });

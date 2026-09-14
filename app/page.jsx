@@ -668,7 +668,7 @@ export default function Home() {
   async function savePartial(path, method, body, fallbackDb, message = "Guardado") {
     if (isLocalPreview()) {
       await saveState(token, fallbackDb, revision, message);
-      return;
+      return { data: fallbackDb, revision };
     }
     const response = await appFetch(path, {
       method,
@@ -682,15 +682,22 @@ export default function Home() {
     if (Array.isArray(payload.users)) setUsers(payload.users);
     setRevision(Number(payload.revision || revision + 1));
     notify(message);
+    return payload;
   }
 
   async function sendTaskNotification(task) {
     if (isLocalPreview()) return;
-    await appFetch("/api/push/task", {
+    const response = await appFetch("/api/push/task", {
       method: "POST",
       headers: apiHeaders(token, { "content-type": "application/json" }),
-      body: JSON.stringify({ id: task.id }),
-    }).catch(() => null);
+      body: JSON.stringify({ id: task.id, task }),
+    });
+    const payload = await response.json().catch(() => ({}));
+    if (!response.ok) {
+      notify(payload.error || "La tarea se guardo, pero no se pudo enviar la notificacion.", "error");
+      return null;
+    }
+    return payload;
   }
 
   useEffect(() => {
@@ -988,8 +995,9 @@ export default function Home() {
       settings: { ...(db.settings || {}), scheduleBlocks: nextBlocks },
     };
     const shouldSendTaskPush = mode === "create" || Number(previousTask?.driverId || 0) !== Number(nextTask.driverId || 0);
-    await savePartial("/api/tasks", mode === "edit" ? "PUT" : "POST", { ...nextTask, notify: false }, nextDb, mode === "edit" ? "Tarea actualizada" : "Tarea creada");
-    if (shouldSendTaskPush) await sendTaskNotification(nextTask);
+    const payload = await savePartial("/api/tasks", mode === "edit" ? "PUT" : "POST", { ...nextTask, notify: false }, nextDb, mode === "edit" ? "Tarea actualizada" : "Tarea creada");
+    const savedTask = payload?.data?.tasks?.find((item) => String(item.id) === String(nextTask.id)) || nextTask;
+    if (shouldSendTaskPush) await sendTaskNotification(savedTask);
     setSelectedDate(nextTask.date);
     setView("agenda");
     setEditingTask(null);
@@ -1040,8 +1048,9 @@ export default function Home() {
       return false;
     }
     const nextDb = { ...db, tasks: db.tasks.map((item) => Number(item.id) === Number(task.id) ? scheduledTask : item) };
-    await savePartial("/api/tasks/schedule", "PUT", { id: task.id, date: scheduledTask.date, start: scheduledTask.start, notify: false }, nextDb, "Horario asignado");
-    await sendTaskNotification(scheduledTask);
+    const payload = await savePartial("/api/tasks/schedule", "PUT", { id: task.id, date: scheduledTask.date, start: scheduledTask.start, notify: false }, nextDb, "Horario asignado");
+    const savedTask = payload?.data?.tasks?.find((item) => String(item.id) === String(scheduledTask.id)) || scheduledTask;
+    await sendTaskNotification(savedTask);
     setRouteDate(scheduledTask.date);
     return true;
   }
