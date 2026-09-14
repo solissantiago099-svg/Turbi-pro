@@ -198,7 +198,7 @@ function AttachmentButton({ file, label = "Ver adjunto", className = "btn" }) {
       {open ? (
         <div className="attachmentModal" role="dialog" aria-modal="true" aria-label={title}>
           <button className="attachmentBackdrop" type="button" aria-label="Cerrar adjunto" onClick={() => setOpen(false)} />
-          <section className="attachmentViewer">
+          <section className={`attachmentViewer ${isImage ? "imageViewer" : "documentViewer"}`}>
             <header>
               <b>{title}</b>
               <button className="iconBtn" type="button" aria-label="Cerrar adjunto" onClick={() => setOpen(false)}><X size={18} /></button>
