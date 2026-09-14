@@ -707,8 +707,13 @@ async function taskPushNotification(request, env) {
   const storedTask = payload?.id ? await readRecord(env, "task", payload.id) : null;
   const task = storedTask || payload?.task;
   if (!task) return Response.json({ error: "Tarea inexistente" }, { status: 404 });
-  const result = await notifyTaskAssignment(env, task, user);
-  return Response.json(result || { total: 0, sent: 0, removed: 0 }, { headers: { "cache-control": "no-store" } });
+  try {
+    const result = await notifyTaskAssignment(env, task, user);
+    return Response.json(result || { total: 0, sent: 0, removed: 0 }, { headers: { "cache-control": "no-store" } });
+  } catch (error) {
+    await audit(env, user, "notify-task-error", "task", String(task.id || ""), { error: error?.message || "error de envio" }).catch(() => null);
+    return Response.json({ error: "No se pudo enviar la notificacion", detail: error?.message || "error de envio" }, { status: 500, headers: { "cache-control": "no-store" } });
+  }
 }
 
 async function revisionInfo(env) {

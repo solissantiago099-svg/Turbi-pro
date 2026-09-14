@@ -687,14 +687,26 @@ export default function Home() {
 
   async function sendTaskNotification(task) {
     if (isLocalPreview()) return;
+    const taskSummary = {
+      id: task.id,
+      title: task.title || "",
+      description: task.description || "",
+      date: task.date || "",
+      start: task.start || "",
+      driverId: task.driverId || null,
+      status: task.status || "",
+      assignedByUserId: task.assignedByUserId || null,
+      assignedByUserName: task.assignedByUserName || "",
+    };
     const response = await appFetch("/api/push/task", {
       method: "POST",
       headers: apiHeaders(token, { "content-type": "application/json" }),
-      body: JSON.stringify({ id: task.id, task }),
+      body: JSON.stringify({ id: task.id, task: taskSummary }),
     });
     const payload = await response.json().catch(() => ({}));
     if (!response.ok) {
-      notify(payload.error || "La tarea se guardo, pero no se pudo enviar la notificacion.", "error");
+      const detail = payload.error || payload.detail || response.statusText || `HTTP ${response.status}`;
+      notify(`La tarea se guardo, pero no se pudo enviar la notificacion: ${detail}.`, "error");
       return null;
     }
     return payload;
