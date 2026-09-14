@@ -2,6 +2,7 @@
 
 import { useEffect, useMemo, useRef, useState } from "react";
 import { Bell, CalendarDays, ChevronDown, ChevronLeft, ChevronRight, Download, Edit3, FileText, LogOut, MapPin, Menu, Phone, Plus, Route, Search, Settings, Trash2, UserCircle, UserPlus, Users, X } from "lucide-react";
+import TaskNotifications from "./TaskNotifications";
 
 const VAPID_PUBLIC_KEY = "BOgzmxTmjpL2edxhwwe1W0MYXq_NsI-4NiJm2uNYJdMNM9HZgFNIxP6yrGJSmtnfa-aVEmAlr6nn8Q-zbQEAm7g";
 
@@ -159,6 +160,12 @@ function normalizedLegalEntities(entities) {
     return { ...fallback, ...existing, name: existing.name || fallback.name, cuit: existing.cuit || fallback.cuit };
   });
 }
+
+function isSupportedAttachment(file) {
+  return ["application/pdf", "image/jpeg", "image/png", "image/webp"].includes(file.type)
+    || (!file.type && /\.(pdf|jpe?g|png|webp)$/i.test(file.name));
+}
+
 function fileToDataURL(file) {
   return new Promise((resolve, reject) => {
     const reader = new FileReader();
@@ -1188,6 +1195,17 @@ export default function Home() {
             <p>{currentView.subtitle}</p>
           </div>
           <div className="topActions">
+            <TaskNotifications
+              key={user.id}
+              tasks={db.tasks}
+              user={user}
+              driverId={driverId}
+              onOpen={(task) => {
+                setSelectedDate(task.date || localISO());
+                setRouteDate(task.date || localISO());
+                setView(currentRole === "chofer" ? "ruta" : "agenda");
+              }}
+            />
             {currentRole !== "chofer" && phoneHref(currentDriver?.phone) ? (
               <a className="iconBtn callIconBtn" href={phoneHref(currentDriver.phone)} aria-label={`Llamar a ${currentDriver.name}`} title={`Llamar a ${currentDriver.name}`}><Phone size={18} /></a>
             ) : currentRole === "chofer" ? (
@@ -1458,7 +1476,7 @@ function TaskList({ tasks, blocks = [], db, users = [], currentUser, onStatus, o
                 {assignerPhone && normalizedRole(currentUser?.role) === "chofer" ? <a className="btn" href={assignerPhone}><Phone size={15} /> Llamar asignador</a> : null}
                 {contactPhone ? <a className="btn" href={contactPhone}><Phone size={15} /> Llamar contacto</a> : null}
                 {driverPhone && normalizedRole(currentUser?.role) !== "chofer" ? <a className="btn" href={driverPhone}><Phone size={15} /> Llamar chofer</a> : null}
-                {task.merchandisePdf?.data ? <a className="btn" href={task.merchandisePdf.data} download={task.merchandisePdf.name}>Abrir PDF</a> : null}
+                {task.merchandisePdf?.data ? <a className="btn" href={task.merchandisePdf.data} download={task.merchandisePdf.name}>Abrir adjunto</a> : null}
                 {!task.start && canSchedule ? <TaskSchedule task={task} onSchedule={onSchedule} /> : null}
                 {canEditTask(task, currentUser) ? <button className="btn" type="button" onClick={() => onEdit(task)}><Edit3 size={15} /> Editar</button> : null}
                 {canOperateThisTask && task.status !== "realizada" ? (
@@ -1667,7 +1685,7 @@ function DailyTask({ task, db, users = [], canOperate, canChangeStatus, currentU
               {assignerPhone && normalizedRole(currentUser?.role) === "chofer" ? <a className="btn" href={assignerPhone}><Phone size={15} /> Llamar asignador</a> : null}
               {driverPhone && normalizedRole(currentUser?.role) !== "chofer" ? <a className="btn" href={driverPhone}><Phone size={15} /> Llamar chofer</a> : null}
               {contactPhone ? <a className="btn" href={contactPhone}><Phone size={15} /> Llamar contacto</a> : null}
-              {task.merchandisePdf?.data ? <a className="btn" href={task.merchandisePdf.data} download={task.merchandisePdf.name}>Abrir PDF</a> : null}
+              {task.merchandisePdf?.data ? <a className="btn" href={task.merchandisePdf.data} download={task.merchandisePdf.name}>Abrir adjunto</a> : null}
               {canEdit ? <button className="btn" type="button" onClick={() => onEdit ? onEdit(task) : beginEditing()}><Edit3 size={15} /> Editar</button> : null}
               {canEdit ? <button className="iconBtn danger" type="button" onClick={() => onDelete(task)} aria-label="Eliminar tarea" title="Eliminar tarea"><Trash2 size={16} /></button> : null}
               {canOperateThisTask && task.status !== "realizada" && task.status !== "en-trabajo" ? <button className="btn" onClick={() => onStatus(task, "en-trabajo")}>Iniciar</button> : null}
@@ -1837,12 +1855,12 @@ function NewTaskForm({ db, prefill, initialTask = null, currentDriverId, canAssi
     try {
       let merchandisePdf = initialTask?.merchandisePdf || null;
       if (pdf) {
-        if (pdf.type !== "application/pdf") {
-          onError("El adjunto debe ser un archivo PDF.");
+        if (!isSupportedAttachment(pdf)) {
+          onError("El adjunto debe ser PDF o una foto JPG, PNG o WebP.");
           return;
         }
         if (pdf.size > 1500000) {
-          onError("El PDF supera el maximo de 1,5 MB.");
+          onError("El archivo supera el maximo de 1,5 MB.");
           return;
         }
         merchandisePdf = { name: pdf.name, size: pdf.size, data: await fileToDataURL(pdf) };
@@ -1898,10 +1916,10 @@ function NewTaskForm({ db, prefill, initialTask = null, currentDriverId, canAssi
             <div><label>Mercaderia <small>(opcional)</small></label><input value={form.merchandise} onChange={(event) => update("merchandise", event.target.value)} /></div>
             <div><label>Cantidades <small>(opcional)</small></label><input value={form.quantities} onChange={(event) => update("quantities", event.target.value)} /></div>
           </div>
-          <label>Adjuntar PDF de mercaderia o cantidades <small>(opcional - maximo 1,5 MB)</small></label>
+          <label>Adjuntar PDF o foto de mercaderia o cantidades <small>(opcional - maximo 1,5 MB)</small></label>
           <label className="pdfUpload">
-            <input type="file" accept="application/pdf,.pdf" onChange={(event) => setPdf(event.target.files?.[0] || null)} />
-            <span>Seleccionar archivo PDF</span>
+            <input type="file" accept="application/pdf,image/jpeg,image/png,image/webp,.pdf,.jpg,.jpeg,.png,.webp" onChange={(event) => setPdf(event.target.files?.[0] || null)} />
+            <span>Seleccionar PDF o foto</span>
             <small>{pdf?.name || initialTask?.merchandisePdf?.name || "Ningun archivo seleccionado"}</small>
           </label>
           <label>Observaciones</label>
@@ -2168,7 +2186,7 @@ function VehicleDetailsCard({ item, onEdit }) {
           {documents.map((doc) => (
             <div className="vehicleDocumentPreview" key={doc.id || doc.name}>
               <div><b>{doc.name}</b><small>{doc.expiry ? `Vence ${new Date(`${doc.expiry}T12:00:00`).toLocaleDateString("es-AR")}` : "Sin vencimiento"}</small></div>
-              {doc.file?.data ? <a href={doc.file.data} download={doc.file.name}>Ver PDF</a> : <span>Sin PDF</span>}
+              {doc.file?.data ? <a href={doc.file.data} download={doc.file.name}>Ver adjunto</a> : <span>Sin archivo</span>}
             </div>
           ))}
         </div>
@@ -2234,12 +2252,12 @@ function LegalEntitiesPanel({ entities, canEdit = false, onSave }) {
 
   async function updateDocument(index, key, file) {
     if (!file) return;
-    if (file.type !== "application/pdf") {
-      alert("La documentacion de la razon social debe ser PDF.");
+    if (!isSupportedAttachment(file)) {
+      alert("Adjunta un PDF o una foto JPG, PNG o WebP.");
       return;
     }
     if (file.size > 1500000) {
-      alert("El PDF supera el maximo de 1,5 MB.");
+      alert("El archivo supera el maximo de 1,5 MB.");
       return;
     }
     const data = await fileToDataURL(file);
@@ -2296,10 +2314,10 @@ function LegalEntitiesPanel({ entities, canEdit = false, onSave }) {
                   const document = entity[documentType.key];
                   return (
                     <div className="legalEntityDoc" key={documentType.key}>
-                      <div><b>{documentType.label}</b><small>{document?.name || "Sin PDF cargado"}</small></div>
+                      <div><b>{documentType.label}</b><small>{document?.name || "Sin archivo cargado"}</small></div>
                       <div className="docActions">
-                        {canEdit ? <label className="linkUpload">{document?.data ? "Reemplazar PDF" : "Subir PDF"}<input type="file" accept="application/pdf,.pdf" onChange={(event) => updateDocument(index, documentType.key, event.target.files?.[0])} /></label> : null}
-                        {document?.data ? <a href={document.data} download={document.name}>Ver PDF</a> : null}
+                        {canEdit ? <label className="linkUpload">{document?.data ? "Reemplazar archivo" : "Subir PDF o foto"}<input type="file" accept="application/pdf,image/jpeg,image/png,image/webp,.pdf,.jpg,.jpeg,.png,.webp" onChange={(event) => updateDocument(index, documentType.key, event.target.files?.[0])} /></label> : null}
+                        {document?.data ? <a href={document.data} download={document.name}>Ver adjunto</a> : null}
                         {canEdit && document?.data ? <button className="documentRemove" type="button" onClick={() => updateEntity(index, { [documentType.key]: null })}>Quitar</button> : null}
                       </div>
                     </div>
@@ -2343,12 +2361,12 @@ function VehicleForm({ vehicle, onCancel, onSave }) {
 
   async function addDocFile(index, file) {
     if (!file) return;
-    if (file.type !== "application/pdf") {
-      alert("La documentacion de camioneta debe ser PDF.");
+    if (!isSupportedAttachment(file)) {
+      alert("Adjunta un PDF o una foto JPG, PNG o WebP.");
       return;
     }
     if (file.size > 1500000) {
-      alert("El PDF supera el maximo de 1,5 MB.");
+      alert("El archivo supera el maximo de 1,5 MB.");
       return;
     }
     const data = await fileToDataURL(file);
@@ -2398,10 +2416,10 @@ function VehicleForm({ vehicle, onCancel, onSave }) {
             </div>
             <div className="docActions">
               <label className="linkUpload">
-                {doc.file?.data ? "Reemplazar PDF" : "Subir PDF"}
-                <input type="file" accept="application/pdf,.pdf" onChange={(event) => addDocFile(index, event.target.files?.[0])} />
+                {doc.file?.data ? "Reemplazar archivo" : "Subir PDF o foto"}
+                <input type="file" accept="application/pdf,image/jpeg,image/png,image/webp,.pdf,.jpg,.jpeg,.png,.webp" onChange={(event) => addDocFile(index, event.target.files?.[0])} />
               </label>
-              {doc.file?.data ? <a href={doc.file.data} download={doc.file.name}>Ver PDF</a> : <span>Sin PDF cargado</span>}
+              {doc.file?.data ? <a href={doc.file.data} download={doc.file.name}>Ver adjunto</a> : <span>Sin archivo cargado</span>}
               <span className={`docExpiry ${daysUntil(doc.expiry) < 0 ? "expired" : ""}`}>{doc.expiry ? (daysUntil(doc.expiry) < 0 ? "Vencido" : `${daysUntil(doc.expiry)} dias`) : "Sin vencimiento"}</span>
             </div>
           </article>
