@@ -138,6 +138,12 @@ function timeToMinutes(value) {
   return Number(hours) * 60 + Number(minutes);
 }
 
+function formatTime24(value) {
+  if (!value) return "";
+  const [hours = "00", minutes = "00"] = String(value).split(":");
+  return String(hours).padStart(2, "0") + ":" + String(minutes).padStart(2, "0") + " HS";
+}
+
 function buenosAiresDateParts(date = new Date()) {
   const parts = new Intl.DateTimeFormat("en-CA", {
     timeZone: "America/Argentina/Buenos_Aires",
