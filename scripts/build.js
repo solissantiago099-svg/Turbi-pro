@@ -683,6 +683,21 @@ async function notifyTaskAssignment(env, task, user) {
   return result;
 }
 
+async function recordTaskNotificationError(env, task, user, error) {
+  const sentAt = new Date().toISOString();
+  const message = error?.message || "error de envio";
+  await writeSettingKey(env, "last_task_push", {
+    at: sentAt,
+    taskId: task.id || null,
+    title: task.title || "",
+    total: 0,
+    sent: 0,
+    removed: 0,
+    error: message,
+  }, user).catch(() => null);
+  await audit(env, user, "notify-task-error", "task", String(task.id || ""), { error: message }).catch(() => null);
+}
+
 async function testPushNotification(request, env) {
   const user = await currentUser(request, env);
   if (!user) return Response.json({ error: "Se requiere inicio de sesion" }, { status: 401 });
@@ -900,7 +915,7 @@ async function saveTask(request, env, mode, ctx) {
   await audit(env, user, mode === "create" ? "create-task" : "update-task", "task", String(nextTask.id), { revision: meta.revision });
   const shouldNotify = payload.notify !== false && (mode === "create" || (nextTask.driverId && Number(existing?.driverId || 0) !== Number(nextTask.driverId)));
   if (shouldNotify) {
-    await notifyTaskAssignment(env, nextTask, user).catch(() => null);
+    await notifyTaskAssignment(env, nextTask, user).catch((error) => recordTaskNotificationError(env, nextTask, user, error));
   }
   return stateResponse(env, user);
 }
@@ -938,7 +953,7 @@ async function scheduleTaskRecord(request, env) {
   await storeRecord(env, "task", nextTask);
   const meta = await bumpRevision(env, user);
   await audit(env, user, "schedule-task", "task", String(task.id), { revision: meta.revision });
-  if (payload.notify !== false) await notifyTaskAssignment(env, nextTask, user).catch(() => null);
+  if (payload.notify !== false) await notifyTaskAssignment(env, nextTask, user).catch((error) => recordTaskNotificationError(env, nextTask, user, error));
   return stateResponse(env, user);
 }
 

@@ -685,33 +685,6 @@ export default function Home() {
     return payload;
   }
 
-  async function sendTaskNotification(task) {
-    if (isLocalPreview()) return;
-    const taskSummary = {
-      id: task.id,
-      title: task.title || "",
-      description: task.description || "",
-      date: task.date || "",
-      start: task.start || "",
-      driverId: task.driverId || null,
-      status: task.status || "",
-      assignedByUserId: task.assignedByUserId || null,
-      assignedByUserName: task.assignedByUserName || "",
-    };
-    const response = await appFetch("/api/push/task", {
-      method: "POST",
-      headers: apiHeaders(token, { "content-type": "application/json" }),
-      body: JSON.stringify({ id: task.id, task: taskSummary }),
-    });
-    const payload = await response.json().catch(() => ({}));
-    if (!response.ok) {
-      const detail = payload.error || payload.detail || response.statusText || `HTTP ${response.status}`;
-      notify(`La tarea se guardo, pero no se pudo enviar la notificacion: ${detail}.`, "error");
-      return null;
-    }
-    return payload;
-  }
-
   useEffect(() => {
     const saved = localStorage.getItem("tamiz_session") || "";
     if (!saved) {
@@ -1006,10 +979,7 @@ export default function Home() {
       tasks: mode === "edit" ? db.tasks.map((item) => (Number(item.id) === Number(nextTask.id) ? nextTask : item)) : [...db.tasks, nextTask],
       settings: { ...(db.settings || {}), scheduleBlocks: nextBlocks },
     };
-    const shouldSendTaskPush = mode === "create" || Number(previousTask?.driverId || 0) !== Number(nextTask.driverId || 0);
-    const payload = await savePartial("/api/tasks", mode === "edit" ? "PUT" : "POST", { ...nextTask, notify: false }, nextDb, mode === "edit" ? "Tarea actualizada" : "Tarea creada");
-    const savedTask = payload?.data?.tasks?.find((item) => String(item.id) === String(nextTask.id)) || nextTask;
-    if (shouldSendTaskPush) await sendTaskNotification(savedTask);
+    await savePartial("/api/tasks", mode === "edit" ? "PUT" : "POST", nextTask, nextDb, mode === "edit" ? "Tarea actualizada" : "Tarea creada");
     setSelectedDate(nextTask.date);
     setView("agenda");
     setEditingTask(null);
@@ -1060,9 +1030,7 @@ export default function Home() {
       return false;
     }
     const nextDb = { ...db, tasks: db.tasks.map((item) => Number(item.id) === Number(task.id) ? scheduledTask : item) };
-    const payload = await savePartial("/api/tasks/schedule", "PUT", { id: task.id, date: scheduledTask.date, start: scheduledTask.start, notify: false }, nextDb, "Horario asignado");
-    const savedTask = payload?.data?.tasks?.find((item) => String(item.id) === String(scheduledTask.id)) || scheduledTask;
-    await sendTaskNotification(savedTask);
+    await savePartial("/api/tasks/schedule", "PUT", { id: task.id, date: scheduledTask.date, start: scheduledTask.start }, nextDb, "Horario asignado");
     setRouteDate(scheduledTask.date);
     return true;
   }
