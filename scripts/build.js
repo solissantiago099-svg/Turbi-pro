@@ -913,7 +913,7 @@ async function saveTask(request, env, mode, ctx) {
   }
   const meta = await bumpRevision(env, user);
   await audit(env, user, mode === "create" ? "create-task" : "update-task", "task", String(nextTask.id), { revision: meta.revision });
-  const shouldNotify = payload.notify !== false && (mode === "create" || (nextTask.driverId && Number(existing?.driverId || 0) !== Number(nextTask.driverId)));
+  const shouldNotify = mode === "create" || (nextTask.driverId && Number(existing?.driverId || 0) !== Number(nextTask.driverId));
   if (shouldNotify) {
     await notifyTaskAssignment(env, nextTask, user).catch((error) => recordTaskNotificationError(env, nextTask, user, error));
   }
@@ -953,7 +953,7 @@ async function scheduleTaskRecord(request, env) {
   await storeRecord(env, "task", nextTask);
   const meta = await bumpRevision(env, user);
   await audit(env, user, "schedule-task", "task", String(task.id), { revision: meta.revision });
-  if (payload.notify !== false) await notifyTaskAssignment(env, nextTask, user).catch((error) => recordTaskNotificationError(env, nextTask, user, error));
+  await notifyTaskAssignment(env, nextTask, user).catch((error) => recordTaskNotificationError(env, nextTask, user, error));
   return stateResponse(env, user);
 }
 
