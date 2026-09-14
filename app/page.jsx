@@ -175,6 +175,46 @@ function fileToDataURL(file) {
   });
 }
 
+function attachmentMime(file) {
+  const source = String(file?.data || "");
+  const match = source.match(/^data:([^;,]+)/);
+  if (match) return match[1];
+  const name = String(file?.name || "");
+  if (/\.pdf$/i.test(name)) return "application/pdf";
+  if (/\.(jpe?g|png|webp)$/i.test(name)) return "image/*";
+  return file?.type || "";
+}
+
+function AttachmentButton({ file, label = "Ver adjunto", className = "btn" }) {
+  const [open, setOpen] = useState(false);
+  if (!file?.data) return null;
+  const mime = attachmentMime(file);
+  const isImage = mime.startsWith("image/") || mime === "image/*";
+  const isPdf = mime === "application/pdf";
+  const title = file.name || "Adjunto";
+  return (
+    <>
+      <button className={className} type="button" onClick={() => setOpen(true)}>{label}</button>
+      {open ? (
+        <div className="attachmentModal" role="dialog" aria-modal="true" aria-label={title}>
+          <button className="attachmentBackdrop" type="button" aria-label="Cerrar adjunto" onClick={() => setOpen(false)} />
+          <section className="attachmentViewer">
+            <header>
+              <b>{title}</b>
+              <button className="iconBtn" type="button" aria-label="Cerrar adjunto" onClick={() => setOpen(false)}><X size={18} /></button>
+            </header>
+            <div className="attachmentFrame">
+              {isImage ? <img src={file.data} alt={title} /> : null}
+              {isPdf ? <iframe src={file.data} title={title} /> : null}
+              {!isImage && !isPdf ? <p>No se puede previsualizar este archivo.</p> : null}
+            </div>
+          </section>
+        </div>
+      ) : null}
+    </>
+  );
+}
+
 const seed = {
   tasks: [
     {
@@ -1476,7 +1516,7 @@ function TaskList({ tasks, blocks = [], db, users = [], currentUser, onStatus, o
                 {assignerPhone && normalizedRole(currentUser?.role) === "chofer" ? <a className="btn" href={assignerPhone}><Phone size={15} /> Llamar asignador</a> : null}
                 {contactPhone ? <a className="btn" href={contactPhone}><Phone size={15} /> Llamar contacto</a> : null}
                 {driverPhone && normalizedRole(currentUser?.role) !== "chofer" ? <a className="btn" href={driverPhone}><Phone size={15} /> Llamar chofer</a> : null}
-                {task.merchandisePdf?.data ? <a className="btn" href={task.merchandisePdf.data} download={task.merchandisePdf.name}>Abrir adjunto</a> : null}
+                <AttachmentButton file={task.merchandisePdf} label="Abrir adjunto" />
                 {!task.start && canSchedule ? <TaskSchedule task={task} onSchedule={onSchedule} /> : null}
                 {canEditTask(task, currentUser) ? <button className="btn" type="button" onClick={() => onEdit(task)}><Edit3 size={15} /> Editar</button> : null}
                 {canOperateThisTask && task.status !== "realizada" ? (
@@ -1685,7 +1725,7 @@ function DailyTask({ task, db, users = [], canOperate, canChangeStatus, currentU
               {assignerPhone && normalizedRole(currentUser?.role) === "chofer" ? <a className="btn" href={assignerPhone}><Phone size={15} /> Llamar asignador</a> : null}
               {driverPhone && normalizedRole(currentUser?.role) !== "chofer" ? <a className="btn" href={driverPhone}><Phone size={15} /> Llamar chofer</a> : null}
               {contactPhone ? <a className="btn" href={contactPhone}><Phone size={15} /> Llamar contacto</a> : null}
-              {task.merchandisePdf?.data ? <a className="btn" href={task.merchandisePdf.data} download={task.merchandisePdf.name}>Abrir adjunto</a> : null}
+              <AttachmentButton file={task.merchandisePdf} label="Abrir adjunto" />
               {canEdit ? <button className="btn" type="button" onClick={() => onEdit ? onEdit(task) : beginEditing()}><Edit3 size={15} /> Editar</button> : null}
               {canEdit ? <button className="iconBtn danger" type="button" onClick={() => onDelete(task)} aria-label="Eliminar tarea" title="Eliminar tarea"><Trash2 size={16} /></button> : null}
               {canOperateThisTask && task.status !== "realizada" && task.status !== "en-trabajo" ? <button className="btn" onClick={() => onStatus(task, "en-trabajo")}>Iniciar</button> : null}
@@ -2186,7 +2226,7 @@ function VehicleDetailsCard({ item, onEdit }) {
           {documents.map((doc) => (
             <div className="vehicleDocumentPreview" key={doc.id || doc.name}>
               <div><b>{doc.name}</b><small>{doc.expiry ? `Vence ${new Date(`${doc.expiry}T12:00:00`).toLocaleDateString("es-AR")}` : "Sin vencimiento"}</small></div>
-              {doc.file?.data ? <a href={doc.file.data} download={doc.file.name}>Ver adjunto</a> : <span>Sin archivo</span>}
+              {doc.file?.data ? <AttachmentButton file={doc.file} label="Ver adjunto" className="linkButton" /> : <span>Sin archivo</span>}
             </div>
           ))}
         </div>
@@ -2317,7 +2357,7 @@ function LegalEntitiesPanel({ entities, canEdit = false, onSave }) {
                       <div><b>{documentType.label}</b><small>{document?.name || "Sin archivo cargado"}</small></div>
                       <div className="docActions">
                         {canEdit ? <label className="linkUpload">{document?.data ? "Reemplazar archivo" : "Subir PDF o foto"}<input type="file" accept="application/pdf,image/jpeg,image/png,image/webp,.pdf,.jpg,.jpeg,.png,.webp" onChange={(event) => updateDocument(index, documentType.key, event.target.files?.[0])} /></label> : null}
-                        {document?.data ? <a href={document.data} download={document.name}>Ver adjunto</a> : null}
+                        {document?.data ? <AttachmentButton file={document} label="Ver adjunto" className="linkButton" /> : null}
                         {canEdit && document?.data ? <button className="documentRemove" type="button" onClick={() => updateEntity(index, { [documentType.key]: null })}>Quitar</button> : null}
                       </div>
                     </div>
@@ -2419,7 +2459,7 @@ function VehicleForm({ vehicle, onCancel, onSave }) {
                 {doc.file?.data ? "Reemplazar archivo" : "Subir PDF o foto"}
                 <input type="file" accept="application/pdf,image/jpeg,image/png,image/webp,.pdf,.jpg,.jpeg,.png,.webp" onChange={(event) => addDocFile(index, event.target.files?.[0])} />
               </label>
-              {doc.file?.data ? <a href={doc.file.data} download={doc.file.name}>Ver adjunto</a> : <span>Sin archivo cargado</span>}
+              {doc.file?.data ? <AttachmentButton file={doc.file} label="Ver adjunto" className="linkButton" /> : <span>Sin archivo cargado</span>}
               <span className={`docExpiry ${daysUntil(doc.expiry) < 0 ? "expired" : ""}`}>{doc.expiry ? (daysUntil(doc.expiry) < 0 ? "Vencido" : `${daysUntil(doc.expiry)} dias`) : "Sin vencimiento"}</span>
             </div>
           </article>
@@ -2539,7 +2579,7 @@ function DriverForm({ driver, linkedUser, onCancel, onSave }) {
       <div className="documentsList">
         {form.docs.length ? form.docs.map((doc) => (
           <div className="documentItem" key={doc.id}>
-            <a href={doc.data} download={doc.name}>{doc.name}</a>
+            <AttachmentButton file={doc} label={doc.name} className="attachmentNameButton" />
             <button className="btn" type="button" onClick={() => removeDocument(doc.id)}>Quitar</button>
           </div>
         )) : <span>No hay documentacion adjunta.</span>}
