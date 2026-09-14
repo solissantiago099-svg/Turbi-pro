@@ -699,6 +699,17 @@ async function testPushNotification(request, env) {
   return Response.json(result || { total: 0, sent: 0, removed: 0 }, { headers: { "cache-control": "no-store" } });
 }
 
+async function taskPushNotification(request, env) {
+  const user = await currentUser(request, env);
+  if (!user) return Response.json({ error: "Se requiere inicio de sesion" }, { status: 401 });
+  if (!env.TAMIZ_VAPID_PRIVATE_JWK) return Response.json({ error: "Avisos no configurados en servidor" }, { status: 503 });
+  const payload = await request.json().catch(() => ({}));
+  const task = payload?.id ? await readRecord(env, "task", payload.id) : payload?.task;
+  if (!task) return Response.json({ error: "Tarea inexistente" }, { status: 404 });
+  const result = await notifyTaskAssignment(env, task, user);
+  return Response.json(result || { total: 0, sent: 0, removed: 0 }, { headers: { "cache-control": "no-store" } });
+}
+
 async function revisionInfo(env) {
   const row = await env.DB.prepare("SELECT revision, updated_at AS updatedAt, updated_by AS updatedBy FROM app_meta WHERE key = ?").bind("state").first();
   return row || { revision: 0, updatedAt: null, updatedBy: null };
@@ -881,7 +892,7 @@ async function saveTask(request, env, mode, ctx) {
   }
   const meta = await bumpRevision(env, user);
   await audit(env, user, mode === "create" ? "create-task" : "update-task", "task", String(nextTask.id), { revision: meta.revision });
-  const shouldNotify = mode === "create" || (nextTask.driverId && Number(existing?.driverId || 0) !== Number(nextTask.driverId));
+  const shouldNotify = payload.notify !== false && (mode === "create" || (nextTask.driverId && Number(existing?.driverId || 0) !== Number(nextTask.driverId)));
   if (shouldNotify) {
     await notifyTaskAssignment(env, nextTask, user).catch(() => null);
   }
@@ -921,7 +932,7 @@ async function scheduleTaskRecord(request, env) {
   await storeRecord(env, "task", nextTask);
   const meta = await bumpRevision(env, user);
   await audit(env, user, "schedule-task", "task", String(task.id), { revision: meta.revision });
-  await notifyTaskAssignment(env, nextTask, user).catch(() => null);
+  if (payload.notify !== false) await notifyTaskAssignment(env, nextTask, user).catch(() => null);
   return stateResponse(env, user);
 }
 
@@ -1012,6 +1023,7 @@ export default {
     if (url.pathname === "/api/push/subscribe" && request.method === "POST") return savePushSubscription(request, env);
     if (url.pathname === "/api/push/devices" && request.method === "GET") return listPushDevices(request, env);
     if (url.pathname === "/api/push/test" && request.method === "POST") return testPushNotification(request, env);
+    if (url.pathname === "/api/push/task" && request.method === "POST") return taskPushNotification(request, env);
     if (url.pathname === "/api/tasks" && request.method === "POST") return saveTask(request, env, "create", ctx);
     if (url.pathname === "/api/tasks" && request.method === "PUT") return saveTask(request, env, "edit", ctx);
     if (url.pathname === "/api/tasks" && request.method === "DELETE") return deleteTaskRecord(request, env);

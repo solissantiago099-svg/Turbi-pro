@@ -637,6 +637,15 @@ export default function Home() {
     notify(message);
   }
 
+  async function sendTaskNotification(task) {
+    if (isLocalPreview()) return;
+    await appFetch("/api/push/task", {
+      method: "POST",
+      headers: apiHeaders(token, { "content-type": "application/json" }),
+      body: JSON.stringify({ id: task.id }),
+    }).catch(() => null);
+  }
+
   useEffect(() => {
     const saved = localStorage.getItem("tamiz_session") || "";
     if (!saved) {
@@ -931,7 +940,9 @@ export default function Home() {
       tasks: mode === "edit" ? db.tasks.map((item) => (Number(item.id) === Number(nextTask.id) ? nextTask : item)) : [...db.tasks, nextTask],
       settings: { ...(db.settings || {}), scheduleBlocks: nextBlocks },
     };
-    await savePartial("/api/tasks", mode === "edit" ? "PUT" : "POST", nextTask, nextDb, mode === "edit" ? "Tarea actualizada" : "Tarea creada");
+    const shouldSendTaskPush = mode === "create" || Number(previousTask?.driverId || 0) !== Number(nextTask.driverId || 0);
+    await savePartial("/api/tasks", mode === "edit" ? "PUT" : "POST", { ...nextTask, notify: false }, nextDb, mode === "edit" ? "Tarea actualizada" : "Tarea creada");
+    if (shouldSendTaskPush) await sendTaskNotification(nextTask);
     setSelectedDate(nextTask.date);
     setView("agenda");
     setEditingTask(null);
@@ -982,7 +993,8 @@ export default function Home() {
       return false;
     }
     const nextDb = { ...db, tasks: db.tasks.map((item) => Number(item.id) === Number(task.id) ? scheduledTask : item) };
-    await savePartial("/api/tasks/schedule", "PUT", { id: task.id, date: scheduledTask.date, start: scheduledTask.start }, nextDb, "Horario asignado");
+    await savePartial("/api/tasks/schedule", "PUT", { id: task.id, date: scheduledTask.date, start: scheduledTask.start, notify: false }, nextDb, "Horario asignado");
+    await sendTaskNotification(scheduledTask);
     setRouteDate(scheduledTask.date);
     return true;
   }
