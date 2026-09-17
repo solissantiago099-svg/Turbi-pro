@@ -201,35 +201,71 @@ function printAttachment(file) {
   const mime = attachmentMime(file);
   const isImage = mime.startsWith("image/") || mime === "image/*";
   const isPdf = mime === "application/pdf";
-  const printWindow = window.open("", "_blank", "noopener,noreferrer");
+  const printWindow = window.open("", "_blank");
   if (!printWindow) {
     window.alert("El navegador bloqueo la ventana de impresion. Habilita ventanas emergentes para imprimir el adjunto.");
     return;
   }
+  const escapedTitle = escapeHtml(title);
   const content = isImage
-    ? `<img src="${file.data}" alt="${escapeHtml(title)}" onload="setTimeout(() => window.print(), 250)" />`
+    ? `<img class="printable" src="${file.data}" alt="${escapedTitle}" onload="readyToPrint()" />`
     : isPdf
-      ? `<iframe src="${file.data}" title="${escapeHtml(title)}" onload="setTimeout(() => window.print(), 700)"></iframe>`
+      ? `<iframe class="printable" src="${file.data}" title="${escapedTitle}" onload="readyToPrint()"></iframe>`
       : `<p>No se puede imprimir este tipo de archivo.</p>`;
+  printWindow.document.open();
   printWindow.document.write(`<!doctype html>
 <html>
   <head>
-    <title>${escapeHtml(title)}</title>
+    <title>${escapedTitle}</title>
     <meta name="viewport" content="width=device-width, initial-scale=1" />
     <style>
-      html, body { margin: 0; min-height: 100%; background: #fff; }
-      body { display: flex; align-items: center; justify-content: center; }
-      img { display: block; max-width: 100%; height: auto; }
-      iframe { border: 0; width: 100vw; height: 100vh; }
-      p { color: #1f2933; font-family: Arial, sans-serif; padding: 24px; }
+      html, body { margin: 0; min-height: 100%; background: #f6f0e5; color: #1f2933; font-family: Arial, sans-serif; }
+      .printBar { align-items: center; background: #233b31; color: #fff; display: flex; gap: 10px; justify-content: space-between; padding: 10px 12px; position: sticky; top: 0; z-index: 2; }
+      .printBar b { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+      .printActions { display: flex; flex-shrink: 0; gap: 8px; }
+      button { appearance: none; border: 1px solid #d8cdb9; border-radius: 9px; cursor: pointer; font: inherit; font-weight: 800; padding: 9px 12px; }
+      .printButton { background: #fff; color: #233b31; }
+      .closeButton { background: transparent; border-color: rgba(255,255,255,.35); color: #fff; }
+      .printHint { background: #fff8db; border-bottom: 1px solid #e6d89a; color: #6b5200; font-size: 14px; padding: 9px 12px; }
+      .printStage { background: #fff; min-height: calc(100vh - 96px); }
+      img.printable { display: block; height: auto; margin: 0 auto; max-width: 100%; }
+      iframe.printable { border: 0; display: block; height: calc(100vh - 96px); width: 100vw; }
+      p { padding: 24px; }
       @media print {
-        body { display: block; }
-        img { max-width: 100%; page-break-inside: avoid; }
-        iframe { width: 100%; height: 100vh; }
+        html, body, .printStage { background: #fff; }
+        .printBar, .printHint { display: none; }
+        img.printable { max-width: 100%; page-break-inside: avoid; }
+        iframe.printable { height: 100vh; width: 100%; }
       }
     </style>
+    <script>
+      let printed = false;
+      function doPrint() {
+        printed = true;
+        window.focus();
+        window.print();
+      }
+      function readyToPrint() {
+        setTimeout(() => {
+          if (!printed) doPrint();
+        }, 700);
+      }
+      setTimeout(() => {
+        if (!printed) document.body.classList.add("ready");
+      }, 1200);
+    </script>
   </head>
-  <body>${content}</body>
+  <body>
+    <div class="printBar">
+      <b>${escapedTitle}</b>
+      <div class="printActions">
+        <button class="printButton" type="button" onclick="doPrint()">Imprimir ahora</button>
+        <button class="closeButton" type="button" onclick="window.close()">Cerrar</button>
+      </div>
+    </div>
+    <div class="printHint">Si no aparece solo el cuadro de impresion, toca "Imprimir ahora".</div>
+    <main class="printStage">${content}</main>
+  </body>
 </html>`);
   printWindow.document.close();
 }
