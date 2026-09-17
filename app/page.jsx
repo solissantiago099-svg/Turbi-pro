@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useMemo, useRef, useState } from "react";
-import { Bell, CalendarDays, ChevronDown, ChevronLeft, ChevronRight, Download, Edit3, FileText, LogOut, MapPin, Menu, Phone, Plus, Route, Search, Settings, Trash2, UserCircle, UserPlus, Users, X } from "lucide-react";
+import { Bell, CalendarDays, ChevronDown, ChevronLeft, ChevronRight, Download, Edit3, FileText, LogOut, MapPin, Menu, Phone, Plus, Printer, Route, Search, Settings, Trash2, UserCircle, UserPlus, Users, X } from "lucide-react";
 import TaskNotifications from "./TaskNotifications";
 
 const VAPID_PUBLIC_KEY = "BOgzmxTmjpL2edxhwwe1W0MYXq_NsI-4NiJm2uNYJdMNM9HZgFNIxP6yrGJSmtnfa-aVEmAlr6nn8Q-zbQEAm7g";
@@ -185,6 +185,55 @@ function attachmentMime(file) {
   return file?.type || "";
 }
 
+function escapeHtml(value) {
+  return String(value || "").replace(/[&<>"']/g, (char) => ({
+    "&": "&amp;",
+    "<": "&lt;",
+    ">": "&gt;",
+    "\"": "&quot;",
+    "'": "&#39;",
+  })[char]);
+}
+
+function printAttachment(file) {
+  if (!file?.data) return;
+  const title = file.name || "Adjunto";
+  const mime = attachmentMime(file);
+  const isImage = mime.startsWith("image/") || mime === "image/*";
+  const isPdf = mime === "application/pdf";
+  const printWindow = window.open("", "_blank", "noopener,noreferrer");
+  if (!printWindow) {
+    window.alert("El navegador bloqueo la ventana de impresion. Habilita ventanas emergentes para imprimir el adjunto.");
+    return;
+  }
+  const content = isImage
+    ? `<img src="${file.data}" alt="${escapeHtml(title)}" onload="setTimeout(() => window.print(), 250)" />`
+    : isPdf
+      ? `<iframe src="${file.data}" title="${escapeHtml(title)}" onload="setTimeout(() => window.print(), 700)"></iframe>`
+      : `<p>No se puede imprimir este tipo de archivo.</p>`;
+  printWindow.document.write(`<!doctype html>
+<html>
+  <head>
+    <title>${escapeHtml(title)}</title>
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <style>
+      html, body { margin: 0; min-height: 100%; background: #fff; }
+      body { display: flex; align-items: center; justify-content: center; }
+      img { display: block; max-width: 100%; height: auto; }
+      iframe { border: 0; width: 100vw; height: 100vh; }
+      p { color: #1f2933; font-family: Arial, sans-serif; padding: 24px; }
+      @media print {
+        body { display: block; }
+        img { max-width: 100%; page-break-inside: avoid; }
+        iframe { width: 100%; height: 100vh; }
+      }
+    </style>
+  </head>
+  <body>${content}</body>
+</html>`);
+  printWindow.document.close();
+}
+
 function AttachmentButton({ file, label = "Ver adjunto", className = "btn" }) {
   const [open, setOpen] = useState(false);
   if (!file?.data) return null;
@@ -213,6 +262,11 @@ function AttachmentButton({ file, label = "Ver adjunto", className = "btn" }) {
       ) : null}
     </>
   );
+}
+
+function PrintAttachmentButton({ file, label = "Imprimir adjunto", className = "btn" }) {
+  if (!file?.data) return null;
+  return <button className={className} type="button" onClick={() => printAttachment(file)}><Printer size={15} /> {label}</button>;
 }
 
 const seed = {
@@ -1506,6 +1560,7 @@ function TaskList({ tasks, blocks = [], db, users = [], currentUser, onStatus, o
                 {contactPhone ? <a className="btn" href={contactPhone}><Phone size={15} /> Llamar contacto</a> : null}
                 {driverPhone && normalizedRole(currentUser?.role) !== "chofer" ? <a className="btn" href={driverPhone}><Phone size={15} /> Llamar chofer</a> : null}
                 <AttachmentButton file={task.merchandisePdf} label="Abrir adjunto" />
+                <PrintAttachmentButton file={task.merchandisePdf} />
                 {!task.start && canSchedule ? <TaskSchedule task={task} onSchedule={onSchedule} /> : null}
                 {canEditTask(task, currentUser) ? <button className="btn" type="button" onClick={() => onEdit(task)}><Edit3 size={15} /> Editar</button> : null}
                 {canOperateThisTask && task.status !== "realizada" ? (
