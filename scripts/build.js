@@ -392,6 +392,12 @@ async function updateMe(request, env) {
 }
 
 function recordMeta(type, record) {
+  if (["advance", "expense"].includes(type)) return {
+    date: record.date || null,
+    start: null,
+    driverId: record.driverId ? Number(record.driverId) : null,
+    status: null,
+  };
   if (type !== "task") return { date: null, start: null, driverId: null, status: null };
   return {
     date: record.date || null,
@@ -815,9 +821,11 @@ async function stateData(env) {
   const tasks = await readRecords(env, "task");
   const vehicles = await readRecords(env, "vehicle");
   const drivers = await readRecords(env, "driver");
+  const advances = await readRecords(env, "advance");
+  const expenses = await readRecords(env, "expense");
   const settings = await readSettings(env);
-  if (!tasks.length && !vehicles.length && !drivers.length && !Object.keys(settings || {}).length) return null;
-  return { tasks, vehicles, drivers, settings: { currentDriverId: 1, scheduleBlocks: [], ...(settings || {}) } };
+  if (!tasks.length && !vehicles.length && !drivers.length && !advances.length && !expenses.length && !Object.keys(settings || {}).length) return null;
+  return { tasks, vehicles, drivers, advances, expenses, settings: { currentDriverId: 1, scheduleBlocks: [], ...(settings || {}) } };
 }
 
 async function runStatementChunks(env, statements, size = 25) {
@@ -837,6 +845,8 @@ async function migrateLegacyState(env) {
     for (const task of legacy.tasks || []) statements.push(env.DB.prepare("INSERT OR REPLACE INTO app_records (type, id, value, date, start, driver_id, status, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?)").bind("task", String(task.id), JSON.stringify(task), task.date || null, task.start || null, task.driverId ? Number(task.driverId) : null, task.status || null, task.updatedAt || new Date().toISOString()));
     for (const vehicle of legacy.vehicles || []) statements.push(env.DB.prepare("INSERT OR REPLACE INTO app_records (type, id, value, date, start, driver_id, status, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?)").bind("vehicle", String(vehicle.id), JSON.stringify(vehicle), null, null, null, vehicle.status || null, vehicle.updatedAt || new Date().toISOString()));
     for (const driver of legacy.drivers || []) statements.push(env.DB.prepare("INSERT OR REPLACE INTO app_records (type, id, value, date, start, driver_id, status, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?)").bind("driver", String(driver.id), JSON.stringify(driver), null, null, null, driver.status || null, driver.updatedAt || new Date().toISOString()));
+    for (const advance of legacy.advances || []) statements.push(env.DB.prepare("INSERT OR REPLACE INTO app_records (type, id, value, date, start, driver_id, status, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?)").bind("advance", String(advance.id), JSON.stringify(advance), advance.date || null, null, advance.driverId ? Number(advance.driverId) : null, null, advance.updatedAt || new Date().toISOString()));
+    for (const expense of legacy.expenses || []) statements.push(env.DB.prepare("INSERT OR REPLACE INTO app_records (type, id, value, date, start, driver_id, status, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?)").bind("expense", String(expense.id), JSON.stringify(expense), expense.date || null, null, expense.driverId ? Number(expense.driverId) : null, null, expense.updatedAt || new Date().toISOString()));
     if (legacy.settings) statements.push(env.DB.prepare("INSERT OR REPLACE INTO app_settings (key, value, updated_at, updated_by) VALUES (?, ?, ?, ?)").bind("default", JSON.stringify(legacy.settings), new Date().toISOString(), null));
     if (statements.length) await runStatementChunks(env, statements);
   }
@@ -864,6 +874,8 @@ async function replaceStateTables(env, data, user) {
   for (const task of data.tasks || []) statements.push(env.DB.prepare("INSERT OR REPLACE INTO app_records (type, id, value, date, start, driver_id, status, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?)").bind("task", String(task.id), JSON.stringify(task), task.date || null, task.start || null, task.driverId ? Number(task.driverId) : null, task.status || null, task.updatedAt || new Date().toISOString()));
   for (const vehicle of data.vehicles || []) statements.push(env.DB.prepare("INSERT OR REPLACE INTO app_records (type, id, value, date, start, driver_id, status, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?)").bind("vehicle", String(vehicle.id), JSON.stringify(vehicle), null, null, null, vehicle.status || null, vehicle.updatedAt || new Date().toISOString()));
   for (const driver of data.drivers || []) statements.push(env.DB.prepare("INSERT OR REPLACE INTO app_records (type, id, value, date, start, driver_id, status, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?)").bind("driver", String(driver.id), JSON.stringify(driver), null, null, null, driver.status || null, driver.updatedAt || new Date().toISOString()));
+  for (const advance of data.advances || []) statements.push(env.DB.prepare("INSERT OR REPLACE INTO app_records (type, id, value, date, start, driver_id, status, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?)").bind("advance", String(advance.id), JSON.stringify(advance), advance.date || null, null, advance.driverId ? Number(advance.driverId) : null, null, advance.updatedAt || new Date().toISOString()));
+  for (const expense of data.expenses || []) statements.push(env.DB.prepare("INSERT OR REPLACE INTO app_records (type, id, value, date, start, driver_id, status, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?)").bind("expense", String(expense.id), JSON.stringify(expense), expense.date || null, null, expense.driverId ? Number(expense.driverId) : null, null, expense.updatedAt || new Date().toISOString()));
   statements.push(env.DB.prepare("INSERT OR REPLACE INTO app_settings (key, value, updated_at, updated_by) VALUES (?, ?, ?, ?)").bind("default", JSON.stringify(data.settings || {}), new Date().toISOString(), user.id));
   if (statements.length) await runStatementChunks(env, statements);
 }
@@ -1043,6 +1055,65 @@ async function deleteTaskRecord(request, env) {
   return stateResponse(env, user);
 }
 
+async function saveAdvanceRecord(request, env) {
+  const user = await currentUser(request, env);
+  if (!user) return Response.json({ error: "Se requiere inicio de sesion" }, { status: 401 });
+  if (!isAdmin(user)) return Response.json({ error: "Solo un administrador puede registrar entregas." }, { status: 403 });
+  await migrateLegacyState(env);
+  const payload = await request.json().catch(() => ({}));
+  const amount = Number(payload.amount || 0);
+  const driverId = Number(payload.driverId || 0);
+  if (!driverId || !Number.isFinite(amount) || amount <= 0) return Response.json({ error: "Entrega invalida" }, { status: 400 });
+  const driver = await readRecord(env, "driver", driverId);
+  if (!driver) return Response.json({ error: "Chofer inexistente" }, { status: 404 });
+  const advance = {
+    id: payload.id || crypto.randomUUID(),
+    driverId,
+    amount,
+    date: String(payload.date || ""),
+    note: String(payload.note || "").trim(),
+    createdAt: new Date().toISOString(),
+    createdByUserId: user.id,
+    createdByName: user.name || user.username || "Administrador",
+  };
+  await storeRecord(env, "advance", advance);
+  const meta = await bumpRevision(env, user);
+  await audit(env, user, "create-advance", "advance", String(advance.id), { driverId, amount, revision: meta.revision });
+  return stateResponse(env, user);
+}
+
+async function saveExpenseRecord(request, env) {
+  const user = await currentUser(request, env);
+  if (!user) return Response.json({ error: "Se requiere inicio de sesion" }, { status: 401 });
+  await migrateLegacyState(env);
+  const payload = await request.json().catch(() => ({}));
+  const amount = Number(payload.amount || 0);
+  const driverId = Number(payload.driverId || 0);
+  if (!driverId || !Number.isFinite(amount) || amount <= 0) return Response.json({ error: "Ticket invalido" }, { status: 400 });
+  if (normalizedRole(user.role) === "chofer" && Number(user.currentDriverId) !== driverId) return Response.json({ error: "Solo puede rendir sus propios tickets." }, { status: 403 });
+  if (!["admin", "chofer"].includes(normalizedRole(user.role))) return Response.json({ error: "No autorizado" }, { status: 403 });
+  const driver = await readRecord(env, "driver", driverId);
+  if (!driver) return Response.json({ error: "Chofer inexistente" }, { status: 404 });
+  const ticketData = String(payload.ticket?.data || "");
+  if (!ticketData.startsWith("data:image/") || ticketData.length > 2500000) return Response.json({ error: "La foto del ticket no es valida o es demasiado pesada." }, { status: 400 });
+  const expense = {
+    id: payload.id || crypto.randomUUID(),
+    driverId,
+    amount,
+    date: String(payload.date || ""),
+    merchant: String(payload.merchant || "").trim(),
+    note: String(payload.note || "").trim(),
+    ticket: { name: String(payload.ticket?.name || "ticket.jpg"), type: "image/jpeg", data: ticketData },
+    createdAt: new Date().toISOString(),
+    uploadedByUserId: user.id,
+    uploadedByName: user.name || user.username || "Chofer",
+  };
+  await storeRecord(env, "expense", expense);
+  const meta = await bumpRevision(env, user);
+  await audit(env, user, "create-expense", "expense", String(expense.id), { driverId, amount, revision: meta.revision });
+  return stateResponse(env, user);
+}
+
 async function saveRecordEndpoint(request, env, type) {
   const user = await currentUser(request, env);
   if (!user) return Response.json({ error: "Se requiere inicio de sesion" }, { status: 401 });
@@ -1117,6 +1188,8 @@ export default {
     if (url.pathname === "/api/tasks" && request.method === "DELETE") return deleteTaskRecord(request, env);
     if (url.pathname === "/api/tasks/status" && request.method === "PUT") return updateTaskStatus(request, env);
     if (url.pathname === "/api/tasks/schedule" && request.method === "PUT") return scheduleTaskRecord(request, env);
+    if (url.pathname === "/api/advances" && request.method === "POST") return saveAdvanceRecord(request, env);
+    if (url.pathname === "/api/expenses" && request.method === "POST") return saveExpenseRecord(request, env);
     if (url.pathname === "/api/drivers" && ["POST", "PUT"].includes(request.method)) return saveRecordEndpoint(request, env, "driver");
     if (url.pathname === "/api/vehicles" && ["POST", "PUT"].includes(request.method)) return saveRecordEndpoint(request, env, "vehicle");
     if (url.pathname === "/api/legal-entities" && request.method === "PUT") return saveLegalEntities(request, env);

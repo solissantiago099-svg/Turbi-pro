@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useMemo, useRef, useState } from "react";
-import { Bell, CalendarDays, ChevronDown, ChevronLeft, ChevronRight, Download, Edit3, FileText, LogOut, MapPin, Menu, Phone, Plus, Printer, Route, Search, Settings, Trash2, UserCircle, UserPlus, Users, X } from "lucide-react";
+import { Banknote, Bell, CalendarDays, Camera, ChevronDown, ChevronLeft, ChevronRight, Download, Edit3, FileText, LogOut, MapPin, Menu, Phone, Plus, Printer, ReceiptText, Route, Search, Settings, Trash2, UserCircle, UserPlus, Users, WalletCards, X } from "lucide-react";
 import TaskNotifications from "./TaskNotifications";
 
 const VAPID_PUBLIC_KEY = "BOgzmxTmjpL2edxhwwe1W0MYXq_NsI-4NiJm2uNYJdMNM9HZgFNIxP6yrGJSmtnfa-aVEmAlr6nn8Q-zbQEAm7g";
@@ -10,6 +10,7 @@ const views = [
   { id: "agenda", label: "Agenda", subtitle: "Planificacion diaria", icon: CalendarDays, roles: ["admin", "usuario"] },
   { id: "ruta", label: "Mi ruta", subtitle: "Trabajo del chofer", icon: Route, roles: ["admin", "chofer"] },
   { id: "nueva", label: "Nueva tarea", subtitle: "Carga rapida", icon: Plus, roles: ["admin", "usuario"] },
+  { id: "gastos", label: "Gastos", subtitle: "Caja y tickets", icon: WalletCards, roles: ["admin", "chofer"] },
   { id: "utilidades", label: "Utilidades", subtitle: "Documentacion", icon: FileText, roles: ["admin", "chofer"] },
   { id: "contactos", label: "Contactos", subtitle: "Equipo operativo", icon: Phone, roles: ["chofer"] },
   { id: "choferes", label: "Choferes", subtitle: "Equipo activo", icon: Users, roles: ["admin"] },
@@ -357,8 +358,37 @@ const seed = {
     maintenance: [{ year: 2026, km: 58000, title: "Cambio de aceite" }],
     plan: [{ title: "Cambio de aceite", nextKm: 68000 }, { title: "Service general", nextKm: 70000 }],
   }],
+  advances: [],
+  expenses: [],
   settings: { currentDriverId: 1, scheduleBlocks: [], legalEntities: defaultLegalEntities() },
 };
+
+function money(value) {
+  return new Intl.NumberFormat("es-AR", { style: "currency", currency: "ARS", maximumFractionDigits: 2 }).format(Number(value || 0));
+}
+
+function expenseDate(value) {
+  if (!value) return "";
+  return new Date(`${value}T12:00:00`).toLocaleDateString("es-AR", { day: "2-digit", month: "2-digit", year: "numeric" });
+}
+
+async function imageToCompactData(file) {
+  const source = await fileToDataURL(file);
+  if (!String(file.type || "").startsWith("image/")) return source;
+  const image = new Image();
+  await new Promise((resolve, reject) => {
+    image.onload = resolve;
+    image.onerror = reject;
+    image.src = source;
+  });
+  const maxSide = 1400;
+  const scale = Math.min(1, maxSide / Math.max(image.width, image.height));
+  const canvas = document.createElement("canvas");
+  canvas.width = Math.max(1, Math.round(image.width * scale));
+  canvas.height = Math.max(1, Math.round(image.height * scale));
+  canvas.getContext("2d").drawImage(image, 0, 0, canvas.width, canvas.height);
+  return canvas.toDataURL("image/jpeg", 0.78);
+}
 
 const statusText = {
   pendiente: "Pendiente",
@@ -557,6 +587,8 @@ async function localApiFetch(path, options = {}) {
     const storedData = JSON.parse(localStorage.getItem("tamiz_local_state") || "null") || seed;
     const data = {
       ...storedData,
+      advances: storedData.advances || [],
+      expenses: storedData.expenses || [],
       tasks: storedData.tasks.map((task) => task.assignedByUserId ? task : {
         ...task,
         assignedByUserId: "local-admin",
@@ -592,6 +624,28 @@ async function localApiFetch(path, options = {}) {
     localStorage.setItem("tamiz_local_state", JSON.stringify(nextData));
     localStorage.setItem("tamiz_local_revision", String(nextRevision));
     return localResponse({ data: nextData, revision: nextRevision });
+  }
+  if (path === "/api/advances" && method === "POST") {
+    if (normalizedRole(current.role) !== "admin") return localResponse({ error: "Solo un administrador puede registrar entregas." }, 403);
+    const payload = JSON.parse(options.body || "{}");
+    const storedData = JSON.parse(localStorage.getItem("tamiz_local_state") || "null") || seed;
+    const advance = { ...payload, id: payload.id || Date.now(), createdAt: new Date().toISOString(), createdByName: current.name || current.username };
+    const data = { ...storedData, advances: [...(storedData.advances || []), advance], expenses: storedData.expenses || [] };
+    const nextRevision = Number(localStorage.getItem("tamiz_local_revision") || 1) + 1;
+    localStorage.setItem("tamiz_local_state", JSON.stringify(data));
+    localStorage.setItem("tamiz_local_revision", String(nextRevision));
+    return localResponse({ data, revision: nextRevision });
+  }
+  if (path === "/api/expenses" && method === "POST") {
+    const payload = JSON.parse(options.body || "{}");
+    if (normalizedRole(current.role) === "chofer" && Number(payload.driverId) !== Number(current.currentDriverId)) return localResponse({ error: "Solo puede rendir sus propios tickets." }, 403);
+    const storedData = JSON.parse(localStorage.getItem("tamiz_local_state") || "null") || seed;
+    const expense = { ...payload, id: payload.id || Date.now(), createdAt: new Date().toISOString(), uploadedByName: current.name || current.username };
+    const data = { ...storedData, expenses: [...(storedData.expenses || []), expense], advances: storedData.advances || [] };
+    const nextRevision = Number(localStorage.getItem("tamiz_local_revision") || 1) + 1;
+    localStorage.setItem("tamiz_local_state", JSON.stringify(data));
+    localStorage.setItem("tamiz_local_revision", String(nextRevision));
+    return localResponse({ data, revision: nextRevision });
   }
   if (path === "/api/users" && ["POST", "PUT"].includes(method)) {
     const payload = JSON.parse(options.body || "{}");
@@ -1251,6 +1305,28 @@ export default function Home() {
     await savePartial("/api/schedule-blocks", "PUT", { blocks: nextBlocks }, nextDb, "Bloqueos actualizados");
   }
 
+  async function saveAdvance(advance) {
+    const nextAdvance = {
+      ...advance,
+      id: advance.id || Date.now(),
+      createdAt: new Date().toISOString(),
+      createdByName: user.name || user.username,
+    };
+    const nextDb = { ...db, advances: [...(db.advances || []), nextAdvance] };
+    await savePartial("/api/advances", "POST", nextAdvance, nextDb, "Entrega registrada");
+  }
+
+  async function saveExpense(expense) {
+    const nextExpense = {
+      ...expense,
+      id: expense.id || Date.now(),
+      createdAt: new Date().toISOString(),
+      uploadedByName: user.name || user.username,
+    };
+    const nextDb = { ...db, expenses: [...(db.expenses || []), nextExpense] };
+    await savePartial("/api/expenses", "POST", nextExpense, nextDb, "Ticket cargado");
+  }
+
   if (loading) return <div className="loading">Cargando TAMIZ RUTAS...</div>;
 
   if (!user) {
@@ -1451,6 +1527,8 @@ export default function Home() {
               onError={(message) => notify(message, "error")}
             />
           )}
+
+          {view === "gastos" && <ExpensesPanel db={db} currentUser={user} currentDriverId={driverId} onAdvance={saveAdvance} onExpense={saveExpense} onError={(message) => notify(message, "error")} />}
 
           {view === "utilidades" && <UtilitiesPanel vehicles={db.vehicles} entities={db.settings?.legalEntities} canEdit={isAdmin} onSaveVehicle={saveVehicle} onSaveLegalEntities={saveLegalEntities} />}
           {view === "contactos" && <ContactsPanel users={users} currentUser={user} />}
@@ -2215,6 +2293,154 @@ function QuickAddresses({ onPick }) {
         </button>
       ))}
     </div>
+  );
+}
+
+function ExpensesPanel({ db, currentUser, currentDriverId, onAdvance, onExpense, onError }) {
+  const isAdmin = normalizedRole(currentUser?.role) === "admin";
+  const drivers = db.drivers || [];
+  const availableDrivers = isAdmin ? drivers : drivers.filter((driver) => Number(driver.id) === Number(currentDriverId));
+  const [selectedDriverId, setSelectedDriverId] = useState(String(availableDrivers[0]?.id || currentDriverId || ""));
+  const [showAdvance, setShowAdvance] = useState(false);
+  const [showExpense, setShowExpense] = useState(false);
+  const [saving, setSaving] = useState(false);
+  const advances = db.advances || [];
+  const expenses = db.expenses || [];
+  const selectedDriver = drivers.find((driver) => String(driver.id) === String(selectedDriverId)) || availableDrivers[0];
+  const driverAdvances = advances.filter((item) => Number(item.driverId) === Number(selectedDriver?.id));
+  const driverExpenses = expenses.filter((item) => Number(item.driverId) === Number(selectedDriver?.id));
+  const delivered = driverAdvances.reduce((total, item) => total + Number(item.amount || 0), 0);
+  const rendered = driverExpenses.reduce((total, item) => total + Number(item.amount || 0), 0);
+  const balance = delivered - rendered;
+  const movements = [
+    ...driverAdvances.map((item) => ({ ...item, kind: "advance" })),
+    ...driverExpenses.map((item) => ({ ...item, kind: "expense" })),
+  ].sort((a, b) => String(b.createdAt || b.date).localeCompare(String(a.createdAt || a.date)));
+
+  async function submitAdvance(event) {
+    event.preventDefault();
+    const form = new FormData(event.currentTarget);
+    const amount = Number(form.get("amount"));
+    if (!selectedDriver || !amount || amount <= 0) return onError("Ingresa un monto valido.");
+    setSaving(true);
+    try {
+      await onAdvance({ driverId: selectedDriver.id, amount, date: String(form.get("date") || localISO()), note: String(form.get("note") || "").trim() });
+      setShowAdvance(false);
+    } finally {
+      setSaving(false);
+    }
+  }
+
+  async function submitExpense(event) {
+    event.preventDefault();
+    const formElement = event.currentTarget;
+    const form = new FormData(formElement);
+    const amount = Number(form.get("amount"));
+    const file = formElement.elements.ticket?.files?.[0];
+    if (!selectedDriver || !amount || amount <= 0) return onError("Ingresa el importe del ticket.");
+    if (!file || !String(file.type || "").startsWith("image/")) return onError("Saca una foto o selecciona una imagen del ticket.");
+    if (file.size > 8 * 1024 * 1024) return onError("La foto es demasiado pesada. El maximo es 8 MB.");
+    setSaving(true);
+    try {
+      const data = await imageToCompactData(file);
+      await onExpense({
+        driverId: selectedDriver.id,
+        amount,
+        date: String(form.get("date") || localISO()),
+        merchant: String(form.get("merchant") || "").trim(),
+        note: String(form.get("note") || "").trim(),
+        ticket: { name: file.name || "ticket.jpg", type: "image/jpeg", data },
+      });
+      setShowExpense(false);
+    } catch {
+      onError("No se pudo procesar la foto del ticket.");
+    } finally {
+      setSaving(false);
+    }
+  }
+
+  if (!selectedDriver) return <div className="empty">Primero hay que vincular el usuario a un chofer.</div>;
+
+  return (
+    <section className="expensesPage">
+      <div className="toolbar expensesToolbar">
+        <div>
+          <span className="eyebrow">CAJA DEL CHOFER</span>
+          <h2>Dinero entregado y rendiciones</h2>
+        </div>
+        {isAdmin && drivers.length > 1 ? (
+          <select className="driverExpenseSelect" value={selectedDriver.id} onChange={(event) => setSelectedDriverId(event.target.value)} aria-label="Elegir chofer">
+            {drivers.map((driver) => <option key={driver.id} value={driver.id}>{driver.name}</option>)}
+          </select>
+        ) : null}
+      </div>
+
+      <div className="expenseBalanceCard">
+        <div>
+          <span className="eyebrow">SALDO A RENDIR</span>
+          <strong>{money(balance)}</strong>
+          <p>{selectedDriver.name}</p>
+        </div>
+        <div className="expenseTotals">
+          <span><Banknote size={18} /><small>Entregado</small><b>{money(delivered)}</b></span>
+          <span><ReceiptText size={18} /><small>Tickets</small><b>{money(rendered)}</b></span>
+        </div>
+      </div>
+
+      <div className="expensePrimaryActions">
+        {isAdmin ? <button className="btn" type="button" onClick={() => { setShowAdvance((value) => !value); setShowExpense(false); }}><Banknote size={17} /> Registrar entrega</button> : null}
+        <button className="btn primary" type="button" onClick={() => { setShowExpense((value) => !value); setShowAdvance(false); }}><Camera size={17} /> Subir ticket</button>
+      </div>
+
+      {showAdvance ? (
+        <form className="formCard expenseForm" onSubmit={submitAdvance}>
+          <h3>Nueva entrega para {selectedDriver.name}</h3>
+          <div className="row">
+            <div><label htmlFor="advanceAmount">Monto</label><input id="advanceAmount" name="amount" type="number" min="0.01" step="0.01" inputMode="decimal" required /></div>
+            <div><label htmlFor="advanceDate">Fecha</label><input id="advanceDate" name="date" type="date" defaultValue={localISO()} required /></div>
+          </div>
+          <label htmlFor="advanceNote">Detalle (opcional)</label>
+          <input id="advanceNote" name="note" placeholder="Efectivo para gastos" />
+          <div className="actions"><button className="btn" type="button" onClick={() => setShowAdvance(false)}>Cancelar</button><button className="btn primary" disabled={saving}>Guardar entrega</button></div>
+        </form>
+      ) : null}
+
+      {showExpense ? (
+        <form className="formCard expenseForm" onSubmit={submitExpense}>
+          <h3>Cargar ticket</h3>
+          <label className="ticketCapture">
+            <Camera size={26} />
+            <span>Foto del ticket</span>
+            <small>Usa la camara o elegi una imagen</small>
+            <input name="ticket" type="file" accept="image/*" capture="environment" required />
+          </label>
+          <div className="row">
+            <div><label htmlFor="expenseAmount">Importe</label><input id="expenseAmount" name="amount" type="number" min="0.01" step="0.01" inputMode="decimal" required /></div>
+            <div><label htmlFor="expenseDate">Fecha</label><input id="expenseDate" name="date" type="date" defaultValue={localISO()} required /></div>
+          </div>
+          <label htmlFor="expenseMerchant">Comercio (opcional)</label>
+          <input id="expenseMerchant" name="merchant" placeholder="Estacion de servicio, peaje..." />
+          <label htmlFor="expenseNote">Observacion (opcional)</label>
+          <input id="expenseNote" name="note" />
+          <div className="actions"><button className="btn" type="button" onClick={() => setShowExpense(false)}>Cancelar</button><button className="btn primary" disabled={saving}>{saving ? "Procesando..." : "Guardar ticket"}</button></div>
+        </form>
+      ) : null}
+
+      <div className="expenseHistory">
+        <div className="sectionTitle"><div><span className="eyebrow">MOVIMIENTOS</span><h2>Historial</h2></div></div>
+        {movements.length ? movements.map((item) => (
+          <article className={`expenseMovement ${item.kind}`} key={`${item.kind}-${item.id}`}>
+            <div className="expenseMovementIcon">{item.kind === "advance" ? <Banknote size={19} /> : <ReceiptText size={19} />}</div>
+            <div className="expenseMovementMain">
+              <b>{item.kind === "advance" ? "Dinero entregado" : (item.merchant || "Ticket")}</b>
+              <small>{expenseDate(item.date)}{item.note ? ` - ${item.note}` : ""}</small>
+            </div>
+            <strong className="expenseMovementAmount">{item.kind === "advance" ? "+" : "-"}{money(item.amount)}</strong>
+            {item.ticket?.data ? <AttachmentButton file={item.ticket} label="Ver ticket" className="btn compact expenseTicketButton" /> : null}
+          </article>
+        )) : <div className="empty">Todavia no hay entregas ni tickets cargados.</div>}
+      </div>
+    </section>
   );
 }
 
