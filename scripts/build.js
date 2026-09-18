@@ -138,6 +138,12 @@ function timeToMinutes(value) {
   return Number(hours) * 60 + Number(minutes);
 }
 
+function formatTime24(value) {
+  if (!value) return "";
+  const [hours = "00", minutes = "00"] = String(value).split(":");
+  return String(hours).padStart(2, "0") + ":" + String(minutes).padStart(2, "0") + " HS";
+}
+
 function buenosAiresDateParts(date = new Date()) {
   const parts = new Intl.DateTimeFormat("en-CA", {
     timeZone: "America/Argentina/Buenos_Aires",
@@ -209,7 +215,7 @@ async function ensureDatabase(env) {
   await env.DB.batch([
     env.DB.prepare("CREATE TABLE IF NOT EXISTS app_state (key TEXT PRIMARY KEY, value TEXT NOT NULL, revision INTEGER NOT NULL DEFAULT 0, updated_at TEXT NOT NULL, updated_by TEXT)"),
     env.DB.prepare("CREATE INDEX IF NOT EXISTS idx_app_state_updated_at ON app_state(updated_at)"),
-    env.DB.prepare("CREATE TABLE IF NOT EXISTS app_users (id TEXT PRIMARY KEY, username TEXT UNIQUE, password_hash TEXT, email TEXT, name TEXT, role TEXT NOT NULL DEFAULT 'chofer', current_driver_id INTEGER, last_seen_at TEXT NOT NULL, created_at TEXT NOT NULL)"),
+    env.DB.prepare("CREATE TABLE IF NOT EXISTS app_users (id TEXT PRIMARY KEY, username TEXT UNIQUE, password_hash TEXT, email TEXT, name TEXT, phone TEXT, role TEXT NOT NULL DEFAULT 'chofer', current_driver_id INTEGER, last_seen_at TEXT NOT NULL, created_at TEXT NOT NULL)"),
     env.DB.prepare("CREATE TABLE IF NOT EXISTS app_sessions (token TEXT PRIMARY KEY, user_id TEXT NOT NULL, created_at TEXT NOT NULL, expires_at TEXT NOT NULL)"),
     env.DB.prepare("CREATE TABLE IF NOT EXISTS app_records (type TEXT NOT NULL, id TEXT NOT NULL, value TEXT NOT NULL, date TEXT, start TEXT, driver_id INTEGER, status TEXT, updated_at TEXT NOT NULL, PRIMARY KEY(type, id))"),
     env.DB.prepare("CREATE TABLE IF NOT EXISTS app_settings (key TEXT PRIMARY KEY, value TEXT NOT NULL, updated_at TEXT NOT NULL, updated_by TEXT)"),
@@ -231,10 +237,11 @@ async function ensureDatabase(env) {
   const userColumnNames = new Set((userColumns.results || []).map(column => column.name));
   if (!userColumnNames.has("username")) await env.DB.prepare("ALTER TABLE app_users ADD COLUMN username TEXT").run();
   if (!userColumnNames.has("password_hash")) await env.DB.prepare("ALTER TABLE app_users ADD COLUMN password_hash TEXT").run();
+  if (!userColumnNames.has("phone")) await env.DB.prepare("ALTER TABLE app_users ADD COLUMN phone TEXT").run();
   await env.DB.prepare("CREATE UNIQUE INDEX IF NOT EXISTS idx_app_users_username ON app_users(username)").run();
   for (const user of bootstrapUsers(env)) {
-    await env.DB.prepare("INSERT INTO app_users (id, username, password_hash, email, name, role, current_driver_id, last_seen_at, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?) ON CONFLICT(id) DO UPDATE SET username = excluded.username, password_hash = excluded.password_hash, email = excluded.email, name = excluded.name, role = excluded.role, current_driver_id = COALESCE(app_users.current_driver_id, excluded.current_driver_id)")
-      .bind(user.id, user.username, user.passwordHash, user.email, user.name, user.role, user.currentDriverId, new Date().toISOString(), new Date().toISOString())
+    await env.DB.prepare("INSERT INTO app_users (id, username, password_hash, email, name, phone, role, current_driver_id, last_seen_at, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?) ON CONFLICT(id) DO UPDATE SET username = excluded.username, password_hash = excluded.password_hash, email = excluded.email, name = excluded.name, role = excluded.role, current_driver_id = COALESCE(app_users.current_driver_id, excluded.current_driver_id)")
+      .bind(user.id, user.username, user.passwordHash, user.email, user.name, "", user.role, user.currentDriverId, new Date().toISOString(), new Date().toISOString())
       .run();
   }
   await env.DB.prepare("PRAGMA optimize").run();
@@ -257,7 +264,7 @@ async function currentUser(request, env) {
   const now = new Date().toISOString();
   const token = bearer(request);
   if (!token) return null;
-  const user = await env.DB.prepare("SELECT u.id, u.username, u.email, u.name, u.role, u.current_driver_id AS currentDriverId, s.expires_at AS sessionExpiresAt FROM app_sessions s JOIN app_users u ON u.id = s.user_id WHERE s.token = ? AND s.expires_at > ?").bind(token, now).first();
+  const user = await env.DB.prepare("SELECT u.id, u.username, u.email, u.name, u.phone, u.role, u.current_driver_id AS currentDriverId, s.expires_at AS sessionExpiresAt FROM app_sessions s JOIN app_users u ON u.id = s.user_id WHERE s.token = ? AND s.expires_at > ?").bind(token, now).first();
   if (user) {
     const renewAfter = Date.now() + 7 * 24 * 60 * 60 * 1000;
     if (new Date(user.sessionExpiresAt).getTime() < renewAfter) {
@@ -276,7 +283,7 @@ async function login(request, env) {
   const payload = await request.json().catch(() => ({}));
   const username = String(payload.username || "").trim().toLowerCase();
   const password = String(payload.password || "");
-  const user = await env.DB.prepare("SELECT id, username, email, name, role, current_driver_id AS currentDriverId, password_hash AS passwordHash FROM app_users WHERE lower(username) = ?").bind(username).first();
+  const user = await env.DB.prepare("SELECT id, username, email, name, phone, role, current_driver_id AS currentDriverId, password_hash AS passwordHash FROM app_users WHERE lower(username) = ?").bind(username).first();
   const hash = await sha256("tamiz-rutas:" + password);
   if (!user || hash !== user.passwordHash) return Response.json({ error: "Usuario o contraseña incorrectos" }, { status: 401 });
   const tokenBytes = new Uint8Array(32);
@@ -310,9 +317,7 @@ async function audit(env, user, action, entity, entityId, details = null) {
 async function session(request, env) {
   const user = await currentUser(request, env);
   if (!user) return Response.json({ error: "Se requiere inicio de sesion" }, { status: 401 });
-  const users = isAdmin(user)
-    ? (await env.DB.prepare("SELECT id, username, email, name, role, current_driver_id AS currentDriverId, last_seen_at AS lastSeenAt FROM app_users ORDER BY created_at ASC, last_seen_at DESC").all()).results
-    : [];
+  const users = (await env.DB.prepare("SELECT id, username, email, name, phone, role, current_driver_id AS currentDriverId, last_seen_at AS lastSeenAt FROM app_users ORDER BY created_at ASC, last_seen_at DESC").all()).results || [];
   return Response.json({ user, users }, { headers: { "cache-control": "no-store" } });
 }
 
@@ -332,8 +337,8 @@ async function createUser(request, env) {
   const id = crypto.randomUUID();
   const hash = await sha256("tamiz-rutas:" + password);
   const now = new Date().toISOString();
-  await env.DB.prepare("INSERT INTO app_users (id, username, password_hash, email, name, role, current_driver_id, last_seen_at, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)")
-    .bind(id, username, hash, "", name, role, currentDriverId, now, now)
+  await env.DB.prepare("INSERT INTO app_users (id, username, password_hash, email, name, phone, role, current_driver_id, last_seen_at, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)")
+    .bind(id, username, hash, "", name, "", role, currentDriverId, now, now)
     .run();
   await audit(env, actor, "create-user", "user", id, { username, role, currentDriverId });
   return session(request, env);
@@ -366,9 +371,24 @@ async function updateMe(request, env) {
   const user = await currentUser(request, env);
   if (!user) return Response.json({ error: "Se requiere inicio de sesion" }, { status: 401 });
   const payload = await request.json();
-  await env.DB.prepare("UPDATE app_users SET current_driver_id = ? WHERE id = ?").bind(payload.currentDriverId || null, user.id).run();
-  await audit(env, user, "update-preference", "user", user.id, { currentDriverId: payload.currentDriverId || null });
-  return session(request, env);
+  const name = String(payload.name || user.name || "").trim();
+  const phone = String(payload.phone || "").trim();
+  const password = String(payload.password || "");
+  if (!name) return Response.json({ error: "Nombre requerido" }, { status: 400 });
+  if (password) {
+    if (password.length < 4) return Response.json({ error: "La contrasena debe tener al menos 4 digitos" }, { status: 400 });
+    const hash = await sha256("tamiz-rutas:" + password);
+    await env.DB.prepare("UPDATE app_users SET name = ?, phone = ?, password_hash = ? WHERE id = ?").bind(name, phone, hash, user.id).run();
+  } else {
+    await env.DB.prepare("UPDATE app_users SET name = ?, phone = ? WHERE id = ?").bind(name, phone, user.id).run();
+  }
+  if (normalizedRole(user.role) === "chofer" && user.currentDriverId) {
+    const driver = await readRecord(env, "driver", user.currentDriverId);
+    if (driver) await storeRecord(env, "driver", { ...driver, name, phone, updatedAt: new Date().toISOString() });
+  }
+  const meta = await bumpRevision(env, user);
+  await audit(env, user, "update-profile", "user", user.id, { phoneChanged: phone !== (user.phone || ""), passwordChanged: Boolean(password), revision: meta.revision });
+  return stateResponse(env, { ...user, name, phone });
 }
 
 function recordMeta(type, record) {
@@ -437,19 +457,98 @@ function base64UrlText(value) {
   return base64UrlBytes(new TextEncoder().encode(value));
 }
 
+function base64UrlToBytes(value) {
+  const normalized = String(value || "").replace(/-/g, "+").replace(/_/g, "/");
+  const padded = normalized + "=".repeat((4 - (normalized.length % 4)) % 4);
+  const binary = atob(padded);
+  const bytes = new Uint8Array(binary.length);
+  for (let index = 0; index < binary.length; index += 1) bytes[index] = binary.charCodeAt(index);
+  return bytes;
+}
+
+function concatBytes(...parts) {
+  const length = parts.reduce((total, part) => total + part.length, 0);
+  const output = new Uint8Array(length);
+  let offset = 0;
+  for (const part of parts) {
+    output.set(part, offset);
+    offset += part.length;
+  }
+  return output;
+}
+
+async function hmacSha256(keyBytes, dataBytes) {
+  const key = await crypto.subtle.importKey("raw", keyBytes, { name: "HMAC", hash: "SHA-256" }, false, ["sign"]);
+  return new Uint8Array(await crypto.subtle.sign("HMAC", key, dataBytes));
+}
+
+async function hkdfExpand(prk, info, length) {
+  const chunks = [];
+  let previous = new Uint8Array(0);
+  let outputLength = 0;
+  for (let counter = 1; outputLength < length; counter += 1) {
+    previous = await hmacSha256(prk, concatBytes(previous, info, new Uint8Array([counter])));
+    chunks.push(previous);
+    outputLength += previous.length;
+  }
+  return concatBytes(...chunks).slice(0, length);
+}
+
 async function vapidToken(env, audience) {
   if (!env.TAMIZ_VAPID_PRIVATE_JWK) return "";
   const jwk = JSON.parse(env.TAMIZ_VAPID_PRIVATE_JWK);
   const key = await crypto.subtle.importKey("jwk", jwk, { name: "ECDSA", namedCurve: "P-256" }, false, ["sign"]);
   const header = base64UrlText(JSON.stringify({ typ: "JWT", alg: "ES256" }));
-  const payload = base64UrlText(JSON.stringify({ aud: audience, exp: Math.floor(Date.now() / 1000) + 43200, sub: "mailto:operaciones@tamiz.local" }));
+  const payload = base64UrlText(JSON.stringify({ aud: audience, exp: Math.floor(Date.now() / 1000) + 43200, sub: "mailto:solissantiago099@gmail.com" }));
   const unsigned = header + "." + payload;
   const signature = await crypto.subtle.sign({ name: "ECDSA", hash: "SHA-256" }, key, new TextEncoder().encode(unsigned));
   return unsigned + "." + base64UrlBytes(signature);
 }
 
+function normalizedPushSubscriptions(value) {
+  return Array.isArray(value) ? value.filter((item) => item?.subscription?.endpoint) : [];
+}
+
+function mergePushSubscriptions(...sources) {
+  const byEndpoint = new Map();
+  for (const source of sources) {
+    for (const item of normalizedPushSubscriptions(source)) {
+      byEndpoint.set(item.subscription.endpoint, item);
+    }
+  }
+  return [...byEndpoint.values()];
+}
+
+function wait(ms) {
+  return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
+async function readPushSubscriptionSources(env) {
+  const settingsSubscriptions = normalizedPushSubscriptions(await readSettingKey(env, "push_subscriptions", []));
+  const recordSubscriptions = normalizedPushSubscriptions(await readRecords(env, "push_subscription").catch(() => []));
+  return {
+    settingsSubscriptions,
+    recordSubscriptions,
+    subscriptions: mergePushSubscriptions(recordSubscriptions, settingsSubscriptions),
+  };
+}
+
+async function writePushSubscriptions(env, subscriptions, user) {
+  const normalized = mergePushSubscriptions(subscriptions).slice(-250);
+  await writeSettingKey(env, "push_subscriptions", normalized, user);
+  await env.DB.prepare("DELETE FROM app_records WHERE type = ?").bind("push_subscription").run();
+  for (const item of normalized) {
+    await storeRecord(env, "push_subscription", { ...item, id: item.id || crypto.randomUUID() });
+  }
+  return normalized;
+}
+
 async function readPushSubscriptions(env) {
-  return await readSettingKey(env, "push_subscriptions", []);
+  const { settingsSubscriptions, recordSubscriptions, subscriptions } = await readPushSubscriptionSources(env);
+  if (settingsSubscriptions.length && recordSubscriptions.length < settingsSubscriptions.length) {
+    await writePushSubscriptions(env, subscriptions, null).catch(() => null);
+  }
+  return subscriptions;
 }
 
 async function savePushSubscription(request, env) {
@@ -462,18 +561,25 @@ async function savePushSubscription(request, env) {
     return Response.json({ error: "Suscripcion invalida" }, { status: 400 });
   }
   const current = await readPushSubscriptions(env);
+  const previous = current.find((item) => item.subscription?.endpoint === subscription.endpoint);
   const next = current.filter((item) => item.subscription?.endpoint !== subscription.endpoint);
+  const now = new Date().toISOString();
   next.push({
-    id: crypto.randomUUID(),
+    id: previous?.id || crypto.randomUUID(),
     userId: user.id,
     username: user.username || "",
     role: normalizedRole(user.role),
     currentDriverId: user.currentDriverId || null,
     subscription,
     device,
-    updatedAt: new Date().toISOString(),
+    firstSeenAt: previous?.firstSeenAt || now,
+    updatedAt: now,
+    lastPushAt: previous?.lastPushAt || null,
+    lastPushOk: previous?.lastPushOk ?? null,
+    lastPushStatus: previous?.lastPushStatus || null,
+    lastPushError: previous?.lastPushError || "",
   });
-  await writeSettingKey(env, "push_subscriptions", next.slice(-250), user);
+  await writePushSubscriptions(env, next, user);
   await audit(env, user, "subscribe-push", "user", user.id);
   return Response.json({ ok: true }, { headers: { "cache-control": "no-store" } });
 }
@@ -482,32 +588,213 @@ function taskNotificationTargets(subscriptions, task) {
   return subscriptions.filter((item) => item?.subscription?.endpoint);
 }
 
-async function sendPush(subscription, env) {
-  const endpoint = subscription?.endpoint || "";
-  if (!endpoint) return { ok: false };
-  const audience = new URL(endpoint).origin;
-  const token = await vapidToken(env, audience);
-  if (!token) return { ok: false };
-  const response = await fetch(endpoint, {
-    method: "POST",
-    headers: {
-      TTL: "86400",
-      Urgency: "normal",
-      Authorization: "vapid t=" + token + ", k=" + VAPID_PUBLIC_KEY,
-    },
-  });
-  return { ok: response.ok, gone: response.status === 404 || response.status === 410 };
+async function encryptedPushBody(subscription, payload) {
+  const userPublicKey = base64UrlToBytes(subscription.keys.p256dh);
+  const authSecret = base64UrlToBytes(subscription.keys.auth);
+  const serverKeys = await crypto.subtle.generateKey({ name: "ECDH", namedCurve: "P-256" }, true, ["deriveBits"]);
+  const serverPublicKey = new Uint8Array(await crypto.subtle.exportKey("raw", serverKeys.publicKey));
+  const importedUserKey = await crypto.subtle.importKey("raw", userPublicKey, { name: "ECDH", namedCurve: "P-256" }, false, []);
+  const sharedSecret = new Uint8Array(await crypto.subtle.deriveBits({ name: "ECDH", public: importedUserKey }, serverKeys.privateKey, 256));
+  const prkKey = await hmacSha256(authSecret, sharedSecret);
+  const keyInfo = concatBytes(new TextEncoder().encode("WebPush: info"), new Uint8Array([0]), userPublicKey, serverPublicKey);
+  const ikm = await hkdfExpand(prkKey, keyInfo, 32);
+  const salt = crypto.getRandomValues(new Uint8Array(16));
+  const prk = await hmacSha256(salt, ikm);
+  const contentEncryptionKey = await hkdfExpand(prk, new TextEncoder().encode("Content-Encoding: aes128gcm\\0"), 16);
+  const nonce = await hkdfExpand(prk, new TextEncoder().encode("Content-Encoding: nonce\\0"), 12);
+  const cryptoKey = await crypto.subtle.importKey("raw", contentEncryptionKey, "AES-GCM", false, ["encrypt"]);
+  const plaintext = concatBytes(new TextEncoder().encode(JSON.stringify(payload)), new Uint8Array([2]));
+  const ciphertext = new Uint8Array(await crypto.subtle.encrypt({ name: "AES-GCM", iv: nonce, tagLength: 128 }, cryptoKey, plaintext));
+  const recordSize = new Uint8Array([0, 0, 16, 0]);
+  return concatBytes(salt, recordSize, new Uint8Array([serverPublicKey.length]), serverPublicKey, ciphertext);
 }
 
-async function notifyTaskAssignment(env, task, user) {
-  if (!env.TAMIZ_VAPID_PRIVATE_JWK) return;
-  const subscriptions = await readPushSubscriptions(env);
-  const targets = taskNotificationTargets(subscriptions, task);
-  if (!targets.length) return;
-  const results = await Promise.allSettled(targets.map((item) => sendPush(item.subscription, env)));
+async function sendPush(subscription, env, payload) {
+  const endpoint = subscription?.endpoint || "";
+  if (!endpoint) return { ok: false, status: 0, error: "endpoint faltante" };
+  const audience = new URL(endpoint).origin;
+  const token = await vapidToken(env, audience);
+  if (!token) return { ok: false, status: 0, error: "vapid faltante" };
+  const body = await encryptedPushBody(subscription, payload);
+  const headers = {
+    TTL: "86400",
+    Urgency: "high",
+    "Content-Encoding": "aes128gcm",
+    "Content-Type": "application/octet-stream",
+  };
+  if (/webpush\.push\.apple\.com/i.test(endpoint)) {
+    headers.Authorization = "WebPush " + token;
+    headers["Crypto-Key"] = "p256ecdsa=" + VAPID_PUBLIC_KEY;
+  } else {
+    headers.Authorization = "vapid t=" + token + ", k=" + VAPID_PUBLIC_KEY;
+  }
+  const response = await fetch(endpoint, {
+    method: "POST",
+    headers,
+    body,
+  });
+  return { ok: response.ok, status: response.status, gone: response.status === 404 || response.status === 410 };
+}
+
+async function sendPushToTargets(env, targets, payload, user) {
+  if (!env.TAMIZ_VAPID_PRIVATE_JWK) return { total: targets.length, sent: 0, removed: 0, error: "vapid faltante" };
+  if (!targets.length) return { total: 0, sent: 0, removed: 0 };
+  const results = await Promise.allSettled(targets.map((item) => sendPush(item.subscription, env, payload)));
+  const now = new Date().toISOString();
   const goneEndpoints = new Set(results.map((result, index) => result.status === "fulfilled" && result.value.gone ? targets[index].subscription.endpoint : null).filter(Boolean));
-  if (goneEndpoints.size) {
-    await writeSettingKey(env, "push_subscriptions", subscriptions.filter((item) => !goneEndpoints.has(item.subscription?.endpoint)), user);
+  const resultByEndpoint = new Map(results.map((result, index) => {
+    const endpoint = targets[index].subscription.endpoint;
+    if (result.status === "fulfilled") return [endpoint, result.value];
+    return [endpoint, { ok: false, status: 0, error: result.reason?.message || "error de envio" }];
+  }));
+  const subscriptions = await readPushSubscriptions(env);
+  const updated = subscriptions
+    .filter((item) => !goneEndpoints.has(item.subscription?.endpoint))
+    .map((item) => {
+      const result = resultByEndpoint.get(item.subscription?.endpoint);
+      if (!result) return item;
+      return {
+        ...item,
+        lastPushAt: now,
+        lastPushOk: Boolean(result.ok),
+        lastPushStatus: result.status || null,
+        lastPushError: result.ok ? "" : (result.error || ("HTTP " + (result.status || 0))),
+      };
+    });
+  await writePushSubscriptions(env, updated, user);
+  return { total: targets.length, sent: results.filter((result) => result.status === "fulfilled" && result.value.ok).length, removed: goneEndpoints.size };
+}
+
+function pushDeviceLabel(device = {}) {
+  const agent = String(device.userAgent || "");
+  if (/iphone|ipad|ipod/i.test(agent)) return "iPhone / iPad";
+  if (/android/i.test(agent)) return "Android";
+  if (/windows/i.test(agent)) return "Windows";
+  if (/mac os/i.test(agent)) return "Mac";
+  return "Dispositivo";
+}
+
+function pushBrowserLabel(device = {}) {
+  const agent = String(device.userAgent || "");
+  if (/crios|chrome/i.test(agent)) return "Chrome";
+  if (/fxios|firefox/i.test(agent)) return "Firefox";
+  if (/safari/i.test(agent) && !/chrome|crios/i.test(agent)) return "Safari";
+  if (/edg/i.test(agent)) return "Edge";
+  return "Navegador";
+}
+
+function pushDevicesResponse(subscriptions) {
+  return subscriptions.map((item) => ({
+    id: item.id,
+    username: item.username || "Usuario",
+    role: item.role || "",
+    platform: pushDeviceLabel(item.device),
+    browser: pushBrowserLabel(item.device),
+    standalone: Boolean(item.device?.standalone),
+    firstSeenAt: item.firstSeenAt || item.updatedAt || null,
+    updatedAt: item.updatedAt || null,
+    lastPushAt: item.lastPushAt || null,
+    lastPushOk: item.lastPushOk ?? null,
+    lastPushStatus: item.lastPushStatus || null,
+    lastPushError: item.lastPushError || "",
+  }));
+}
+
+async function listPushDevices(request, env) {
+  const user = await currentUser(request, env);
+  if (!user) return Response.json({ error: "Se requiere inicio de sesion" }, { status: 401 });
+  if (!isAdmin(user)) return Response.json({ error: "No autorizado" }, { status: 403 });
+  const subscriptions = await readPushSubscriptions(env);
+  const lastTaskNotification = await readSettingKey(env, "last_task_push", null);
+  return Response.json({ devices: pushDevicesResponse(subscriptions), lastTaskNotification }, { headers: { "cache-control": "no-store" } });
+}
+
+async function notifyTaskAssignment(env, task, user, source = "task") {
+  let subscriptionSources = await readPushSubscriptionSources(env);
+  let subscriptions = subscriptionSources.subscriptions;
+  let retried = false;
+  if (!subscriptions.length) {
+    retried = true;
+    await wait(250);
+    subscriptionSources = await readPushSubscriptionSources(env);
+    subscriptions = subscriptionSources.subscriptions;
+  }
+  if (subscriptionSources.settingsSubscriptions.length && subscriptionSources.recordSubscriptions.length < subscriptionSources.settingsSubscriptions.length) {
+    await writePushSubscriptions(env, subscriptions, null).catch(() => null);
+  }
+  const targets = taskNotificationTargets(subscriptions, task);
+  const sentAt = new Date().toISOString();
+  const result = await sendPushToTargets(env, targets, {
+    title: "Nueva tarea asignada",
+    body: (task.start ? formatTime24(task.start) + " - " : "") + (task.title || "Abrí TAMIZ RUTAS para ver el detalle."),
+    tag: "tamiz-task-" + String(task.id || Date.now()) + "-" + Date.now(),
+    url: "/",
+  }, user);
+  await writeSettingKey(env, "last_task_push", {
+    at: sentAt,
+    taskId: task.id || null,
+    title: task.title || "",
+    total: result?.total || 0,
+    sent: result?.sent || 0,
+    removed: result?.removed || 0,
+    source,
+    subscriptions: subscriptions.length,
+    endpoints: subscriptions.filter((item) => item?.subscription?.endpoint).length,
+    targets: targets.length,
+    settingsSubscriptions: subscriptionSources.settingsSubscriptions.length,
+    recordSubscriptions: subscriptionSources.recordSubscriptions.length,
+    retried,
+    error: result?.error || "",
+  }, user);
+  await audit(env, user, "notify-task", "task", String(task.id || ""), result || { total: 0, sent: 0, removed: 0 });
+  return result;
+}
+
+async function recordTaskNotificationError(env, task, user, error) {
+  const sentAt = new Date().toISOString();
+  const message = error?.message || "error de envio";
+  await writeSettingKey(env, "last_task_push", {
+    at: sentAt,
+    taskId: task.id || null,
+    title: task.title || "",
+    total: 0,
+    sent: 0,
+    removed: 0,
+    error: message,
+  }, user).catch(() => null);
+  await audit(env, user, "notify-task-error", "task", String(task.id || ""), { error: message }).catch(() => null);
+}
+
+async function testPushNotification(request, env) {
+  const user = await currentUser(request, env);
+  if (!user) return Response.json({ error: "Se requiere inicio de sesion" }, { status: 401 });
+  if (!env.TAMIZ_VAPID_PRIVATE_JWK) return Response.json({ error: "Avisos no configurados en servidor" }, { status: 503 });
+  const subscriptions = await readPushSubscriptions(env);
+  const targets = subscriptions.filter((item) => item?.subscription?.endpoint);
+  const result = await sendPushToTargets(env, targets, {
+    title: "Notificacion de prueba",
+    body: "Si ves esto, los avisos de TAMIZ RUTAS estan funcionando.",
+    tag: "tamiz-test-" + Date.now(),
+    url: "/",
+  }, user);
+  await audit(env, user, "test-push", "push", "all", result || { total: 0, sent: 0, removed: 0 });
+  return Response.json(result || { total: 0, sent: 0, removed: 0 }, { headers: { "cache-control": "no-store" } });
+}
+
+async function taskPushNotification(request, env) {
+  const user = await currentUser(request, env);
+  if (!user) return Response.json({ error: "Se requiere inicio de sesion" }, { status: 401 });
+  if (!env.TAMIZ_VAPID_PRIVATE_JWK) return Response.json({ error: "Avisos no configurados en servidor" }, { status: 503 });
+  const payload = await request.json().catch(() => ({}));
+  const storedTask = payload?.id ? await readRecord(env, "task", payload.id) : null;
+  const task = storedTask || payload?.task;
+  if (!task) return Response.json({ error: "Tarea inexistente" }, { status: 404 });
+  try {
+    const result = await notifyTaskAssignment(env, task, user);
+    return Response.json(result || { total: 0, sent: 0, removed: 0 }, { headers: { "cache-control": "no-store" } });
+  } catch (error) {
+    await audit(env, user, "notify-task-error", "task", String(task.id || ""), { error: error?.message || "error de envio" }).catch(() => null);
+    return Response.json({ error: "No se pudo enviar la notificacion", detail: error?.message || "error de envio" }, { status: 500, headers: { "cache-control": "no-store" } });
   }
 }
 
@@ -564,9 +851,7 @@ async function stateResponse(env, user) {
   await migrateLegacyState(env);
   const data = await stateData(env);
   const meta = await revisionInfo(env);
-  const users = isAdmin(user)
-    ? (await env.DB.prepare("SELECT id, username, email, name, role, current_driver_id AS currentDriverId, last_seen_at AS lastSeenAt FROM app_users ORDER BY created_at ASC, last_seen_at DESC").all()).results
-    : [];
+  const users = (await env.DB.prepare("SELECT id, username, email, name, phone, role, current_driver_id AS currentDriverId, last_seen_at AS lastSeenAt FROM app_users ORDER BY created_at ASC, last_seen_at DESC").all()).results || [];
   return Response.json({ data, revision: meta.revision || 0, updatedAt: meta.updatedAt || null, updatedBy: meta.updatedBy || null, user, users }, { headers: { "cache-control": "no-store" } });
 }
 
@@ -605,6 +890,7 @@ async function writeState(request, env) {
   }
   const previousData = await stateData(env);
   const nextData = structuredClone(payload.data);
+  const createdTasks = [];
   if (previousData?.tasks) {
     const previousTasks = new Map(previousData.tasks.map(task => [String(task.id), task]));
     for (const nextTask of nextData.tasks) {
@@ -612,6 +898,7 @@ async function writeState(request, env) {
       if (!previousTask) {
         nextTask.assignedByUserId = user.id;
         nextTask.assignedByUserName = user.name || user.username || user.email || "Usuario";
+        createdTasks.push(nextTask);
         continue;
       }
       const { status: previousStatus, updatedAt: previousUpdatedAt, ...previousContent } = previousTask;
@@ -636,6 +923,7 @@ async function writeState(request, env) {
   await replaceStateTables(env, nextData, user);
   const meta = await bumpRevision(env, user);
   await audit(env, user, payload.action || "save-state", "app_state", "default", { revision: meta.revision });
+  for (const task of createdTasks) await notifyTaskAssignment(env, task, user, "state").catch((error) => recordTaskNotificationError(env, task, user, error));
   return stateResponse(env, user);
 }
 
@@ -692,11 +980,9 @@ async function saveTask(request, env, mode, ctx) {
   }
   const meta = await bumpRevision(env, user);
   await audit(env, user, mode === "create" ? "create-task" : "update-task", "task", String(nextTask.id), { revision: meta.revision });
-  const shouldNotify = nextTask.driverId && (mode === "create" || Number(existing?.driverId || 0) !== Number(nextTask.driverId));
+  const shouldNotify = mode === "create" || (nextTask.driverId && Number(existing?.driverId || 0) !== Number(nextTask.driverId));
   if (shouldNotify) {
-    const notification = notifyTaskAssignment(env, nextTask, user).catch(() => null);
-    if (ctx?.waitUntil) ctx.waitUntil(notification);
-    else await notification;
+    await notifyTaskAssignment(env, nextTask, user, mode === "create" ? "create-task" : "edit-task").catch((error) => recordTaskNotificationError(env, nextTask, user, error));
   }
   return stateResponse(env, user);
 }
@@ -734,6 +1020,7 @@ async function scheduleTaskRecord(request, env) {
   await storeRecord(env, "task", nextTask);
   const meta = await bumpRevision(env, user);
   await audit(env, user, "schedule-task", "task", String(task.id), { revision: meta.revision });
+  await notifyTaskAssignment(env, nextTask, user, "schedule-task").catch((error) => recordTaskNotificationError(env, nextTask, user, error));
   return stateResponse(env, user);
 }
 
@@ -780,6 +1067,7 @@ async function saveLegalEntities(request, env) {
   const entities = payload.entities.map((entity, index) => ({
     id: String(entity?.id || ("razon-social-" + (index + 1))),
     name: String(entity?.name || "").trim(),
+    cuit: String(entity?.cuit || "").trim(),
     email: String(entity?.email || "").trim(),
     afip: entity?.afip || null,
     iibb: entity?.iibb || null,
@@ -821,6 +1109,9 @@ export default {
     if (url.pathname === "/api/state" && request.method === "PUT") return writeState(request, env);
     if (url.pathname === "/api/push/public-key" && request.method === "GET") return pushPublicKey();
     if (url.pathname === "/api/push/subscribe" && request.method === "POST") return savePushSubscription(request, env);
+    if (url.pathname === "/api/push/devices" && request.method === "GET") return listPushDevices(request, env);
+    if (url.pathname === "/api/push/test" && request.method === "POST") return testPushNotification(request, env);
+    if (url.pathname === "/api/push/task" && request.method === "POST") return taskPushNotification(request, env);
     if (url.pathname === "/api/tasks" && request.method === "POST") return saveTask(request, env, "create", ctx);
     if (url.pathname === "/api/tasks" && request.method === "PUT") return saveTask(request, env, "edit", ctx);
     if (url.pathname === "/api/tasks" && request.method === "DELETE") return deleteTaskRecord(request, env);

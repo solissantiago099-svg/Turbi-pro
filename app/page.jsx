@@ -1,8 +1,7 @@
 "use client";
 
 import { useEffect, useMemo, useRef, useState } from "react";
-import { Bell, CalendarDays, ChevronDown, ChevronLeft, ChevronRight, Download, Edit3, LogOut, MapPin, Menu, Phone, Plus, Route, Search, Settings, Trash2, Truck, UserPlus, X } from "lucide-react";
-
+import { Bell, CalendarDays, ChevronDown, ChevronLeft, ChevronRight, Download, Edit3, FileText, LogOut, MapPin, Menu, Phone, Plus, Printer, Route, Search, Settings, Trash2, UserCircle, UserPlus, Users, X } from "lucide-react";
 import TaskNotifications from "./TaskNotifications";
 
 const VAPID_PUBLIC_KEY = "BOgzmxTmjpL2edxhwwe1W0MYXq_NsI-4NiJm2uNYJdMNM9HZgFNIxP6yrGJSmtnfa-aVEmAlr6nn8Q-zbQEAm7g";
@@ -11,7 +10,10 @@ const views = [
   { id: "agenda", label: "Agenda", subtitle: "Planificacion diaria", icon: CalendarDays, roles: ["admin", "usuario"] },
   { id: "ruta", label: "Mi ruta", subtitle: "Trabajo del chofer", icon: Route, roles: ["admin", "chofer"] },
   { id: "nueva", label: "Nueva tarea", subtitle: "Carga rapida", icon: Plus, roles: ["admin", "usuario"] },
-  { id: "vehiculos", label: "Utilidades", subtitle: "Documentacion y vehiculos", icon: Truck, roles: ["admin"] },
+  { id: "utilidades", label: "Utilidades", subtitle: "Documentacion", icon: FileText, roles: ["admin", "chofer"] },
+  { id: "contactos", label: "Contactos", subtitle: "Equipo operativo", icon: Phone, roles: ["chofer"] },
+  { id: "choferes", label: "Choferes", subtitle: "Equipo activo", icon: Users, roles: ["admin"] },
+  { id: "perfil", label: "Mi perfil", subtitle: "Datos personales", icon: UserCircle, roles: ["admin", "usuario", "chofer"] },
   { id: "configuracion", label: "Configuracion", subtitle: "Usuarios y respaldo", icon: Settings, roles: ["admin"] },
 ];
 
@@ -143,22 +145,25 @@ function defaultVehicleDocs() {
 }
 
 function defaultLegalEntities() {
-  return Array.from({ length: 4 }, (_, index) => ({
-    id: `razon-social-${index + 1}`,
-    name: "",
-    email: "",
-    afip: null,
-    iibb: null,
-  }));
+  return [
+    { id: "dondera", name: "DONDERA", cuit: "30-71710929-1", email: "", afip: null, iibb: null },
+    { id: "1876", name: "1876", cuit: "30-71690382-2", email: "", afip: null, iibb: null },
+    { id: "kumitate", name: "KUMITATE", cuit: "30-71807733-4", email: "", afip: null, iibb: null },
+    { id: "luar", name: "LUAR", cuit: "30-71713990-5", email: "", afip: null, iibb: null },
+  ];
 }
 
 function normalizedLegalEntities(entities) {
   const current = Array.isArray(entities) ? entities : [];
-  return defaultLegalEntities().map((fallback, index) => ({ ...fallback, ...(current[index] || {}) }));
+  return defaultLegalEntities().map((fallback, index) => {
+    const existing = current.find((entity) => entity?.id === fallback.id) || current[index] || {};
+    return { ...fallback, ...existing, name: existing.name || fallback.name, cuit: existing.cuit || fallback.cuit };
+  });
 }
+
 function isSupportedAttachment(file) {
-  return ["application/pdf", "image/jpeg", "image/png", "image/webp"].includes(file.type) ||
-    (!file.type && /\.(pdf|jpe?g|png|webp)$/i.test(file.name));
+  return ["application/pdf", "image/jpeg", "image/png", "image/webp"].includes(file.type)
+    || (!file.type && /\.(pdf|jpe?g|png|webp)$/i.test(file.name));
 }
 
 function fileToDataURL(file) {
@@ -168,6 +173,136 @@ function fileToDataURL(file) {
     reader.onerror = reject;
     reader.readAsDataURL(file);
   });
+}
+
+function attachmentMime(file) {
+  const source = String(file?.data || "");
+  const match = source.match(/^data:([^;,]+)/);
+  if (match) return match[1];
+  const name = String(file?.name || "");
+  if (/\.pdf$/i.test(name)) return "application/pdf";
+  if (/\.(jpe?g|png|webp)$/i.test(name)) return "image/*";
+  return file?.type || "";
+}
+
+function escapeHtml(value) {
+  return String(value || "").replace(/[&<>"']/g, (char) => ({
+    "&": "&amp;",
+    "<": "&lt;",
+    ">": "&gt;",
+    "\"": "&quot;",
+    "'": "&#39;",
+  })[char]);
+}
+
+function printAttachment(file) {
+  if (!file?.data) return;
+  const title = file.name || "Adjunto";
+  const mime = attachmentMime(file);
+  const isImage = mime.startsWith("image/") || mime === "image/*";
+  const isPdf = mime === "application/pdf";
+  const printWindow = window.open("", "_blank");
+  if (!printWindow) {
+    window.alert("El navegador bloqueo la ventana de impresion. Habilita ventanas emergentes para imprimir el adjunto.");
+    return;
+  }
+  const escapedTitle = escapeHtml(title);
+  const content = isImage
+    ? `<img class="printable" src="${file.data}" alt="${escapedTitle}" onload="readyToPrint()" />`
+    : isPdf
+      ? `<iframe class="printable" src="${file.data}" title="${escapedTitle}" onload="readyToPrint()"></iframe>`
+      : `<p>No se puede imprimir este tipo de archivo.</p>`;
+  printWindow.document.open();
+  printWindow.document.write(`<!doctype html>
+<html>
+  <head>
+    <title>${escapedTitle}</title>
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <style>
+      html, body { margin: 0; min-height: 100%; background: #f6f0e5; color: #1f2933; font-family: Arial, sans-serif; }
+      .printBar { align-items: center; background: #233b31; color: #fff; display: flex; gap: 10px; justify-content: space-between; padding: 10px 12px; position: sticky; top: 0; z-index: 2; }
+      .printBar b { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+      .printActions { display: flex; flex-shrink: 0; gap: 8px; }
+      button { appearance: none; border: 1px solid #d8cdb9; border-radius: 9px; cursor: pointer; font: inherit; font-weight: 800; padding: 9px 12px; }
+      .printButton { background: #fff; color: #233b31; }
+      .closeButton { background: transparent; border-color: rgba(255,255,255,.35); color: #fff; }
+      .printHint { background: #fff8db; border-bottom: 1px solid #e6d89a; color: #6b5200; font-size: 14px; padding: 9px 12px; }
+      .printStage { background: #fff; min-height: calc(100vh - 96px); }
+      img.printable { display: block; height: auto; margin: 0 auto; max-width: 100%; }
+      iframe.printable { border: 0; display: block; height: calc(100vh - 96px); width: 100vw; }
+      p { padding: 24px; }
+      @media print {
+        html, body, .printStage { background: #fff; }
+        .printBar, .printHint { display: none; }
+        img.printable { max-width: 100%; page-break-inside: avoid; }
+        iframe.printable { height: 100vh; width: 100%; }
+      }
+    </style>
+    <script>
+      let printed = false;
+      function doPrint() {
+        printed = true;
+        window.focus();
+        window.print();
+      }
+      function readyToPrint() {
+        setTimeout(() => {
+          if (!printed) doPrint();
+        }, 700);
+      }
+      setTimeout(() => {
+        if (!printed) document.body.classList.add("ready");
+      }, 1200);
+    </script>
+  </head>
+  <body>
+    <div class="printBar">
+      <b>${escapedTitle}</b>
+      <div class="printActions">
+        <button class="printButton" type="button" onclick="doPrint()">Imprimir ahora</button>
+        <button class="closeButton" type="button" onclick="window.close()">Cerrar</button>
+      </div>
+    </div>
+    <div class="printHint">Si no aparece solo el cuadro de impresion, toca "Imprimir ahora".</div>
+    <main class="printStage">${content}</main>
+  </body>
+</html>`);
+  printWindow.document.close();
+}
+
+function AttachmentButton({ file, label = "Ver adjunto", className = "btn" }) {
+  const [open, setOpen] = useState(false);
+  if (!file?.data) return null;
+  const mime = attachmentMime(file);
+  const isImage = mime.startsWith("image/") || mime === "image/*";
+  const isPdf = mime === "application/pdf";
+  const title = file.name || "Adjunto";
+  return (
+    <>
+      <button className={className} type="button" onClick={() => setOpen(true)}>{label}</button>
+      {open ? (
+        <div className="attachmentModal" role="dialog" aria-modal="true" aria-label={title}>
+          <button className="attachmentBackdrop" type="button" aria-label="Cerrar adjunto" onClick={() => setOpen(false)} />
+          <section className={`attachmentViewer ${isImage ? "imageViewer" : "documentViewer"}`}>
+            <header>
+              <b>{title}</b>
+              <button className="iconBtn" type="button" aria-label="Cerrar adjunto" onClick={() => setOpen(false)}><X size={18} /></button>
+            </header>
+            <div className="attachmentFrame">
+              {isImage ? <img src={file.data} alt={title} /> : null}
+              {isPdf ? <iframe src={file.data} title={title} /> : null}
+              {!isImage && !isPdf ? <p>No se puede previsualizar este archivo.</p> : null}
+            </div>
+          </section>
+        </div>
+      ) : null}
+    </>
+  );
+}
+
+function PrintAttachmentButton({ file, label = "Imprimir adjunto", className = "btn" }) {
+  if (!file?.data) return null;
+  return <button className={className} type="button" onClick={() => printAttachment(file)}><Printer size={15} /> {label}</button>;
 }
 
 const seed = {
@@ -283,6 +418,10 @@ function taskAssignerLabel(task) {
   return createdDateTime ? `${assigner} - ${createdDateTime}` : assigner;
 }
 
+function taskAssignerUser(task, users = []) {
+  return users.find((item) => item?.id && task?.assignedByUserId && String(item.id) === String(task.assignedByUserId)) || null;
+}
+
 function encodeMap(value) {
   return encodeURIComponent(value || "");
 }
@@ -346,6 +485,17 @@ function publicLocalUsers(users = localUsers) {
   return users.map(({ password: _password, ...user }) => user);
 }
 
+function contactUsers(users = localUsers) {
+  return publicLocalUsers(users).map((user) => ({
+    id: user.id,
+    username: user.username,
+    name: user.name,
+    role: user.role,
+    phone: user.phone || "",
+    currentDriverId: user.currentDriverId || null,
+  }));
+}
+
 function urlBase64ToUint8Array(value) {
   const padding = "=".repeat((4 - (value.length % 4)) % 4);
   const base64 = (value + padding).replace(/-/g, "+").replace(/_/g, "/");
@@ -385,15 +535,24 @@ async function localApiFetch(path, options = {}) {
   }
   if (path === "/api/push/public-key" && method === "GET") return localResponse({ publicKey: VAPID_PUBLIC_KEY, supported: true });
   if (path === "/api/push/subscribe" && method === "POST") return localResponse({ ok: true });
+  if (path === "/api/push/devices" && method === "GET") return localResponse({ devices: [] });
+  if (path === "/api/push/test" && method === "POST") return localResponse({ total: 1, sent: 1, removed: 0 });
   if (path === "/api/login" && method === "POST") {
     const credentials = JSON.parse(options.body || "{}");
     const found = savedUsers.find((item) => item.username === String(credentials.username || "").toLowerCase() && item.password === credentials.password);
     if (!found) return localResponse({ error: "Usuario o contrasena incorrectos" }, 401);
-    return localResponse({ token: `local:${found.username}`, user: publicLocalUsers([found])[0], users: publicLocalUsers(savedUsers) });
+    return localResponse({ token: `local:${found.username}`, user: publicLocalUsers([found])[0], users: contactUsers(savedUsers) });
   }
   if (path === "/api/logout") return localResponse({ ok: true });
   if (!current) return localResponse({ error: "Sesion vencida" }, 401);
-  if (path === "/api/session") return localResponse({ user: publicLocalUsers([current])[0], users: publicLocalUsers(savedUsers) });
+  if (path === "/api/session") return localResponse({ user: publicLocalUsers([current])[0], users: contactUsers(savedUsers) });
+  if (path === "/api/me" && method === "PUT") {
+    const payload = JSON.parse(options.body || "{}");
+    const nextCurrent = { ...current, name: String(payload.name || current.name || "").trim(), phone: String(payload.phone || "").trim(), password: payload.password || current.password };
+    const nextUsers = savedUsers.map((item) => item.id === current.id ? nextCurrent : item);
+    localStorage.setItem("tamiz_local_users", JSON.stringify(nextUsers));
+    return localResponse({ user: publicLocalUsers([nextCurrent])[0], users: contactUsers(nextUsers), data: JSON.parse(localStorage.getItem("tamiz_local_state") || "null") || seed });
+  }
   if (path === "/api/state" && method === "GET") {
     const storedData = JSON.parse(localStorage.getItem("tamiz_local_state") || "null") || seed;
     const data = {
@@ -406,7 +565,7 @@ async function localApiFetch(path, options = {}) {
     };
     localStorage.setItem("tamiz_local_state", JSON.stringify(data));
     const revision = Number(localStorage.getItem("tamiz_local_revision") || 1);
-    return localResponse({ user: publicLocalUsers([current])[0], users: publicLocalUsers(savedUsers), data, revision });
+    return localResponse({ user: publicLocalUsers([current])[0], users: contactUsers(savedUsers), data, revision });
   }
   if (path === "/api/state" && method === "PUT") {
     const payload = JSON.parse(options.body || "{}");
@@ -441,13 +600,17 @@ async function localApiFetch(path, options = {}) {
     const nextUsers = existing ? savedUsers.map((item) => item.id === existing.id ? nextUser : item) : [...savedUsers, nextUser];
     localStorage.setItem("tamiz_local_users", JSON.stringify(nextUsers));
     const nextCurrent = nextUser.id === current.id ? publicLocalUsers([nextUser])[0] : publicLocalUsers([current])[0];
-    return localResponse({ user: nextCurrent, users: publicLocalUsers(nextUsers) });
+    return localResponse({ user: nextCurrent, users: contactUsers(nextUsers) });
   }
   return localResponse({ error: "Endpoint local no disponible" }, 404);
 }
 
 function appFetch(path, options) {
   return isLocalPreview() && path.startsWith("/api/") ? localApiFetch(path, options) : fetch(path, options);
+}
+
+function isLocalMode() {
+  return isLocalPreview();
 }
 
 async function ensureServiceWorkerRegistration() {
@@ -484,6 +647,7 @@ export default function Home() {
 
   const currentRole = normalizedRole(user?.role);
   const visibleViews = useMemo(() => views.filter((item) => canAccessView(currentRole, item)), [currentRole]);
+  const selectedView = views.find((item) => item.id === view);
   const currentView = visibleViews.find((item) => item.id === view) || visibleViews[0] || views[0];
   const isAdmin = currentRole === "admin";
   const canManageTasks = ["admin", "usuario"].includes(currentRole);
@@ -594,7 +758,7 @@ export default function Home() {
   async function savePartial(path, method, body, fallbackDb, message = "Guardado") {
     if (isLocalPreview()) {
       await saveState(token, fallbackDb, revision, message);
-      return;
+      return { data: fallbackDb, revision };
     }
     const response = await appFetch(path, {
       method,
@@ -608,6 +772,7 @@ export default function Home() {
     if (Array.isArray(payload.users)) setUsers(payload.users);
     setRevision(Number(payload.revision || revision + 1));
     notify(message);
+    return payload;
   }
 
   useEffect(() => {
@@ -684,10 +849,10 @@ export default function Home() {
   }, [token, user]);
 
   useEffect(() => {
-    if (!user || canAccessView(currentRole, currentView)) return;
+    if (!user || (selectedView && canAccessView(currentRole, selectedView))) return;
     const fallback = visibleViews[0]?.id || (currentRole === "chofer" ? "ruta" : "agenda");
     setView(fallback);
-  }, [currentRole, currentView, user, visibleViews]);
+  }, [currentRole, selectedView, user, visibleViews]);
 
   useEffect(() => {
     if (!menuOpen) return undefined;
@@ -1029,6 +1194,52 @@ export default function Home() {
     };
     await savePartial("/api/legal-entities", "PUT", { entities: nextEntities }, nextDb, "Documentacion recurrente actualizada");
   }
+
+  async function sendTestNotification() {
+    if (!token) return;
+    setPushState("saving");
+    try {
+      if (isLocalPreview()) {
+        if (Notification.permission === "granted") {
+          new Notification("Notificacion de prueba", { body: "Si ves esto, los avisos de TAMIZ RUTAS estan funcionando.", icon: "/icons/icon-192.png" });
+        }
+        setPushState("enabled");
+        notify("Notificacion de prueba enviada");
+        return;
+      }
+      const response = await appFetch("/api/push/test", {
+        method: "POST",
+        headers: apiHeaders(token, { "content-type": "application/json" }),
+      });
+      const payload = await response.json().catch(() => ({}));
+      if (!response.ok) throw new Error(payload.error || "No se pudo enviar la prueba");
+      setPushState("enabled");
+      notify(payload.sent ? `Prueba enviada a ${payload.sent} dispositivo${payload.sent === 1 ? "" : "s"}` : "No hay dispositivos con avisos activos", payload.sent ? "success" : "error");
+    } catch (error) {
+      setPushState("enabled");
+      notify(error.message || "No se pudo enviar la prueba", "error");
+    }
+  }
+
+  async function saveProfile(payload) {
+    const response = await appFetch("/api/me", {
+      method: "PUT",
+      headers: apiHeaders(token, { "content-type": "application/json" }),
+      body: JSON.stringify(payload),
+    });
+    const result = await response.json().catch(() => ({}));
+    if (!response.ok) {
+      notify(result.error || "No se pudo actualizar el perfil", "error");
+      return false;
+    }
+    if (result.user) setUser(result.user);
+    if (Array.isArray(result.users)) setUsers(result.users);
+    if (result.data) setDb(result.data);
+    if (result.revision) setRevision(Number(result.revision));
+    notify("Perfil actualizado");
+    return true;
+  }
+
   async function saveScheduleBlocks(nextBlocks) {
     const nextDb = {
       ...db,
@@ -1103,13 +1314,21 @@ export default function Home() {
             <p>{currentView.subtitle}</p>
           </div>
           <div className="topActions">
-            <TaskNotifications key={user.id} tasks={db.tasks} user={user} driverId={driverId} onOpen={(task) => {
-              setSelectedDate(task.date || localISO());
-              setRouteDate(task.date || localISO());
-              setView(currentRole === "chofer" ? "ruta" : "agenda");
-            }} />
-            {phoneHref(currentDriver?.phone) ? (
+            <TaskNotifications
+              key={user.id}
+              tasks={db.tasks}
+              user={user}
+              driverId={driverId}
+              onOpen={(task) => {
+                setSelectedDate(task.date || localISO());
+                setRouteDate(task.date || localISO());
+                setView(currentRole === "chofer" ? "ruta" : "agenda");
+              }}
+            />
+            {currentRole !== "chofer" && phoneHref(currentDriver?.phone) ? (
               <a className="iconBtn callIconBtn" href={phoneHref(currentDriver.phone)} aria-label={`Llamar a ${currentDriver.name}`} title={`Llamar a ${currentDriver.name}`}><Phone size={18} /></a>
+            ) : currentRole === "chofer" ? (
+              <button className="iconBtn callIconBtn" type="button" onClick={() => setView("contactos")} aria-label="Ver contactos" title="Ver contactos"><Phone size={18} /></button>
             ) : (
               <button className="iconBtn callIconBtn" type="button" disabled aria-label="Chofer sin telefono" title="Carga el telefono desde Choferes"><Phone size={18} /></button>
             )}
@@ -1154,6 +1373,7 @@ export default function Home() {
                 date={selectedDate}
                 tasks={dayTasks}
                 db={db}
+                users={users}
                 scheduleBlocks={scheduleBlocks}
                 showSummary={false}
                 canCreate={canManageTasks}
@@ -1193,21 +1413,21 @@ export default function Home() {
                 </div>
               </div>
               <RouteTaskGroup title="Tareas del dia" count={routeTasks.filter((task) => task.start && task.status !== "realizada").length + routeBlocks.length} defaultOpen>
-                <TaskList tasks={routeTasks.filter((task) => task.start && task.status !== "realizada")} blocks={routeBlocks} db={db} currentUser={user} onStatus={updateTask} onSchedule={scheduleTask} canSchedule={false} canOperate canChangeStatus={canChangeTaskStatus} onEdit={(task) => {
+                <TaskList tasks={routeTasks.filter((task) => task.start && task.status !== "realizada")} blocks={routeBlocks} db={db} users={users} currentUser={user} onStatus={updateTask} onSchedule={scheduleTask} canSchedule={false} canOperate canChangeStatus={canChangeTaskStatus} onEdit={(task) => {
                   setEditingTask(task);
                   setTaskPrefill({ date: task.date, time: task.start });
                   setView("nueva");
                 }} />
               </RouteTaskGroup>
               <RouteTaskGroup title="Tareas sin horario" count={routeTasks.filter((task) => !task.start && task.status !== "realizada").length} defaultOpen>
-                <TaskList tasks={routeTasks.filter((task) => !task.start && task.status !== "realizada")} db={db} currentUser={user} onStatus={updateTask} onSchedule={scheduleTask} canSchedule={["admin", "usuario", "chofer"].includes(currentRole)} canOperate canChangeStatus={canChangeTaskStatus} onEdit={(task) => {
+                <TaskList tasks={routeTasks.filter((task) => !task.start && task.status !== "realizada")} db={db} users={users} currentUser={user} onStatus={updateTask} onSchedule={scheduleTask} canSchedule={["admin", "usuario", "chofer"].includes(currentRole)} canOperate canChangeStatus={canChangeTaskStatus} onEdit={(task) => {
                   setEditingTask(task);
                   setTaskPrefill({ date: task.date, time: task.start });
                   setView("nueva");
                 }} />
               </RouteTaskGroup>
               <RouteTaskGroup title="Tareas realizadas" count={routeTasks.filter((task) => task.status === "realizada").length}>
-                <TaskList tasks={routeTasks.filter((task) => task.status === "realizada")} db={db} currentUser={user} onStatus={updateTask} onSchedule={scheduleTask} canSchedule={false} canOperate canChangeStatus={canChangeTaskStatus} onEdit={(task) => {
+                <TaskList tasks={routeTasks.filter((task) => task.status === "realizada")} db={db} users={users} currentUser={user} onStatus={updateTask} onSchedule={scheduleTask} canSchedule={false} canOperate canChangeStatus={canChangeTaskStatus} onEdit={(task) => {
                   setEditingTask(task);
                   setTaskPrefill({ date: task.date, time: task.start });
                   setView("nueva");
@@ -1232,9 +1452,11 @@ export default function Home() {
             />
           )}
 
-          {view === "vehiculos" && <Records items={db.vehicles} type="vehicle" legalEntities={db.settings?.legalEntities} onSaveLegalEntities={saveLegalEntities} onSave={saveVehicle} />}
+          {view === "utilidades" && <UtilitiesPanel vehicles={db.vehicles} entities={db.settings?.legalEntities} canEdit={isAdmin} onSaveVehicle={saveVehicle} onSaveLegalEntities={saveLegalEntities} />}
+          {view === "contactos" && <ContactsPanel users={users} currentUser={user} />}
           {view === "choferes" && <Records items={db.drivers} type="driver" users={users} onSave={saveDriver} />}
-          {view === "configuracion" && <SettingsPanel user={user} users={users} db={db} token={token} revision={revision} onUsers={setUsers} onUser={setUser} onNotify={notify} />}
+          {view === "perfil" && <ProfilePanel user={user} currentDriver={currentDriver} onSave={saveProfile} />}
+          {view === "configuracion" && <SettingsPanel user={user} users={users} db={db} token={token} revision={revision} onUsers={setUsers} onUser={setUser} onNotify={notify} onTestPush={sendTestNotification} />}
         </div>
       </section>
       {toast ? <div className={`toast show ${toast.type === "error" ? "error" : ""}`}>{toast.message}</div> : null}
@@ -1281,7 +1503,7 @@ function RouteTaskGroup({ title, count, defaultOpen = false, children }) {
     </details>
   );
 }
-function TaskList({ tasks, blocks = [], db, currentUser, onStatus, onEdit, onSchedule, canSchedule, canOperate, canChangeStatus }) {
+function TaskList({ tasks, blocks = [], db, users = [], currentUser, onStatus, onEdit, onSchedule, canSchedule, canOperate, canChangeStatus }) {
   const entries = [
     ...tasks.map((task) => ({ kind: "task", start: task.start || "", task })),
     ...blocks.map((block) => ({ kind: "block", start: block.start || "", block })),
@@ -1331,6 +1553,7 @@ function TaskList({ tasks, blocks = [], db, currentUser, onStatus, onEdit, onSch
         const driver = db.drivers.find((item) => Number(item.id) === Number(task.driverId || currentUser?.currentDriverId));
         const driverPhone = phoneHref(driver?.phone);
         const contactPhone = phoneHref(task.phone);
+        const assignerPhone = phoneHref(taskAssignerUser(task, users)?.phone);
         return (
           <details className={`driverTaskCard ${task.status === "realizada" ? "completed" : ""} ${task.status === "en-trabajo" ? "active" : ""}`} key={task.id}>
             <summary className="driverTaskHeader">
@@ -1369,9 +1592,11 @@ function TaskList({ tasks, blocks = [], db, currentUser, onStatus, onEdit, onSch
               </section> : null}
               <div className="driverTaskActions">
                 {!isBlockTask ? <a className="iconBtn navigationBtn" href={taskGoogleMapsURL(task)} target="_blank" rel="noreferrer" aria-label="Abrir navegacion en Google Maps" title="Abrir navegacion en Google Maps"><MapPin size={19} /></a> : null}
+                {assignerPhone && normalizedRole(currentUser?.role) === "chofer" ? <a className="btn" href={assignerPhone}><Phone size={15} /> Llamar asignador</a> : null}
                 {contactPhone ? <a className="btn" href={contactPhone}><Phone size={15} /> Llamar contacto</a> : null}
                 {driverPhone && normalizedRole(currentUser?.role) !== "chofer" ? <a className="btn" href={driverPhone}><Phone size={15} /> Llamar chofer</a> : null}
-                {task.merchandisePdf?.data ? <a className="btn" href={task.merchandisePdf.data} download={task.merchandisePdf.name}>Abrir adjunto</a> : null}
+                <AttachmentButton file={task.merchandisePdf} label="Abrir adjunto" />
+                <PrintAttachmentButton file={task.merchandisePdf} />
                 {!task.start && canSchedule ? <TaskSchedule task={task} onSchedule={onSchedule} /> : null}
                 {canEditTask(task, currentUser) ? <button className="btn" type="button" onClick={() => onEdit(task)}><Edit3 size={15} /> Editar</button> : null}
                 {canOperateThisTask && task.status !== "realizada" ? (
@@ -1416,7 +1641,7 @@ function TaskSchedule({ task, onSchedule }) {
     </form>
   );
 }
-function DailySchedule({ date, tasks, db, scheduleBlocks = [], showSummary = true, canCreate, canChangeStatus, currentUser, onFreeSlot, onStatus, onEdit, onDelete, onSave }) {
+function DailySchedule({ date, tasks, db, users = [], scheduleBlocks = [], showSummary = true, canCreate, canChangeStatus, currentUser, onFreeSlot, onStatus, onEdit, onDelete, onSave }) {
   const hours = Array.from({ length: 13 }, (_, index) => index + 7);
   const outside = tasks.filter((task) => {
     const hour = Number(String(task.start || "00:00").split(":")[0]);
@@ -1441,7 +1666,7 @@ function DailySchedule({ date, tasks, db, scheduleBlocks = [], showSummary = tru
                 {hourValue}
               </button>
               <div className="scheduleContent">
-                {hourTasks.length ? hourTasks.map((task) => <DailyTask key={task.id} task={task} db={db} canOperate={canCreate} canChangeStatus={canChangeStatus} currentUser={currentUser} onStatus={onStatus} onEdit={onEdit} onDelete={onDelete} onSave={onSave} />) : (
+                {hourTasks.length ? hourTasks.map((task) => <DailyTask key={task.id} task={task} db={db} users={users} canOperate={canCreate} canChangeStatus={canChangeStatus} currentUser={currentUser} onStatus={onStatus} onEdit={onEdit} onDelete={onDelete} onSave={onSave} />) : (
                   <button className={`freeSlot ${blocked ? "blockedSlot" : ""}`} disabled={!canCreate || Boolean(blocked)} onClick={() => onFreeSlot(hourValue)}>
                     <span>{blocked ? "Horario bloqueado" : "Horario libre"}</span>
                     <small>{blocked ? `${blocked.title || "Bloqueo operativo"} - ${blockTimeLabel(blocked)}` : "Agregar tarea"}</small>
@@ -1455,7 +1680,7 @@ function DailySchedule({ date, tasks, db, scheduleBlocks = [], showSummary = tru
           <div className="scheduleRow occupied" key={`outside-${task.id}`}>
             <span className="scheduleTime">{task.start}</span>
             <div className="scheduleContent">
-              <DailyTask task={task} db={db} canOperate={canCreate} canChangeStatus={canChangeStatus} currentUser={currentUser} onStatus={onStatus} onEdit={onEdit} onDelete={onDelete} onSave={onSave} outside />
+              <DailyTask task={task} db={db} users={users} canOperate={canCreate} canChangeStatus={canChangeStatus} currentUser={currentUser} onStatus={onStatus} onEdit={onEdit} onDelete={onDelete} onSave={onSave} outside />
             </div>
           </div>
         ))}
@@ -1464,7 +1689,7 @@ function DailySchedule({ date, tasks, db, scheduleBlocks = [], showSummary = tru
   );
 }
 
-function DailyTask({ task, db, canOperate, canChangeStatus, currentUser, onStatus, onEdit, onDelete, onSave, outside = false }) {
+function DailyTask({ task, db, users = [], canOperate, canChangeStatus, currentUser, onStatus, onEdit, onDelete, onSave, outside = false }) {
   const [editing, setEditing] = useState(false);
   const [saving, setSaving] = useState(false);
   const [draft, setDraft] = useState(null);
@@ -1479,6 +1704,7 @@ function DailyTask({ task, db, canOperate, canChangeStatus, currentUser, onStatu
   const driver = db?.drivers?.find((item) => Number(item.id) === Number(task.driverId || currentUser?.currentDriverId));
   const driverPhone = phoneHref(driver?.phone);
   const contactPhone = phoneHref(task.phone);
+  const assignerPhone = phoneHref(taskAssignerUser(task, users)?.phone);
   const metaItems = [
     task.distance ? ["Distancia", `${task.distance} km`] : null,
     task.merchandise ? ["Mercaderia", task.merchandise] : null,
@@ -1576,9 +1802,10 @@ function DailyTask({ task, db, canOperate, canChangeStatus, currentUser, onStatu
           ) : (
             <>
               {!isBlockTask ? <a className="btn primary" href={taskGoogleMapsURL(task)} target="_blank" rel="noreferrer">Abrir en Google Maps</a> : null}
-              {driverPhone ? <a className="btn" href={driverPhone}><Phone size={15} /> Llamar chofer</a> : null}
+              {assignerPhone && normalizedRole(currentUser?.role) === "chofer" ? <a className="btn" href={assignerPhone}><Phone size={15} /> Llamar asignador</a> : null}
+              {driverPhone && normalizedRole(currentUser?.role) !== "chofer" ? <a className="btn" href={driverPhone}><Phone size={15} /> Llamar chofer</a> : null}
               {contactPhone ? <a className="btn" href={contactPhone}><Phone size={15} /> Llamar contacto</a> : null}
-              {task.merchandisePdf?.data ? <a className="btn" href={task.merchandisePdf.data} download={task.merchandisePdf.name}>Abrir adjunto</a> : null}
+              <AttachmentButton file={task.merchandisePdf} label="Abrir adjunto" />
               {canEdit ? <button className="btn" type="button" onClick={() => onEdit ? onEdit(task) : beginEditing()}><Edit3 size={15} /> Editar</button> : null}
               {canEdit ? <button className="iconBtn danger" type="button" onClick={() => onDelete(task)} aria-label="Eliminar tarea" title="Eliminar tarea"><Trash2 size={16} /></button> : null}
               {canOperateThisTask && task.status !== "realizada" && task.status !== "en-trabajo" ? <button className="btn" onClick={() => onStatus(task, "en-trabajo")}>Iniciar</button> : null}
@@ -1991,7 +2218,7 @@ function QuickAddresses({ onPick }) {
   );
 }
 
-function Records({ items, type, users = [], legalEntities = [], onSaveLegalEntities, onSave }) {
+function Records({ items, type, users = [], onSave }) {
   const [editing, setEditing] = useState(null);
   const isDriver = type === "driver";
   const isVehicle = type === "vehicle";
@@ -2008,7 +2235,6 @@ function Records({ items, type, users = [], legalEntities = [], onSaveLegalEntit
           </button>
         </div>
       ) : null}
-      {isVehicle ? <LegalEntitiesPanel entities={legalEntities} onSave={onSaveLegalEntities} /> : null}
       {editing && isDriver ? (
         <DriverForm
           driver={editing}
@@ -2080,19 +2306,59 @@ function VehicleDetailsCard({ item, onEdit }) {
           {documents.map((doc) => (
             <div className="vehicleDocumentPreview" key={doc.id || doc.name}>
               <div><b>{doc.name}</b><small>{doc.expiry ? `Vence ${new Date(`${doc.expiry}T12:00:00`).toLocaleDateString("es-AR")}` : "Sin vencimiento"}</small></div>
-              {doc.file?.data ? <a href={doc.file.data} download={doc.file.name}>Ver adjunto</a> : <span>Sin archivo</span>}
+              {doc.file?.data ? <AttachmentButton file={doc.file} label="Ver adjunto" className="linkButton" /> : <span>Sin archivo</span>}
             </div>
           ))}
         </div>
-        <div className="actions">
-          <button className="btn" type="button" onClick={onEdit}><Edit3 size={15} /> Editar vehiculo</button>
-        </div>
+        {onEdit ? (
+          <div className="actions">
+            <button className="btn" type="button" onClick={onEdit}><Edit3 size={15} /> Editar vehiculo</button>
+          </div>
+        ) : null}
       </div>
     </details>
   );
 }
 
-function LegalEntitiesPanel({ entities, onSave }) {
+function UtilitiesPanel({ vehicles = [], entities, canEdit, onSaveVehicle, onSaveLegalEntities }) {
+  const [editingVehicle, setEditingVehicle] = useState(null);
+  return (
+    <>
+      <div className="toolbar">
+        <div>
+          <span className="eyebrow">UTILIDADES</span>
+          <h2>Documentacion</h2>
+        </div>
+      </div>
+      {editingVehicle ? (
+        <VehicleForm
+          vehicle={editingVehicle}
+          onCancel={() => setEditingVehicle(null)}
+          onSave={async (vehicle) => {
+            await onSaveVehicle(vehicle);
+            setEditingVehicle(null);
+          }}
+        />
+      ) : null}
+      <section className="utilitySections">
+        <div className="utilityBlock">
+          <span className="eyebrow">CAMIONETA</span>
+          <section className="grid">
+            {vehicles.map((vehicle) => (
+              <VehicleDetailsCard item={vehicle} key={vehicle.id} onEdit={canEdit ? () => setEditingVehicle(vehicle) : null} />
+            ))}
+          </section>
+        </div>
+        <div className="utilityBlock">
+          <span className="eyebrow">RAZONES SOCIALES</span>
+          <LegalEntitiesPanel entities={entities} canEdit={canEdit} onSave={onSaveLegalEntities} />
+        </div>
+      </section>
+    </>
+  );
+}
+
+function LegalEntitiesPanel({ entities, canEdit = false, onSave }) {
   const [form, setForm] = useState(() => normalizedLegalEntities(entities));
   const [saving, setSaving] = useState(false);
 
@@ -2120,6 +2386,7 @@ function LegalEntitiesPanel({ entities, onSave }) {
 
   async function submit(event) {
     event.preventDefault();
+    if (!canEdit) return;
     setSaving(true);
     try {
       await onSave(form);
@@ -2129,36 +2396,38 @@ function LegalEntitiesPanel({ entities, onSave }) {
   }
 
   return (
-    <form className="card legalEntitiesCard" onSubmit={submit}>
-      <div className="formTitle legalEntitiesTitle">
-        <div>
-          <span className="eyebrow">DOCUMENTACION RECURRENTE</span>
-          <h2>Razones sociales</h2>
-          <p>Correos y constancias fiscales disponibles para el equipo administrativo.</p>
-        </div>
-        <button className="btn primary" disabled={saving}>{saving ? "Guardando..." : "Guardar documentacion"}</button>
-      </div>
+    <form className="legalEntitiesCard" onSubmit={submit}>
       <div className="legalEntitiesGrid">
-        {form.map((entity, index) => (
-          <details className="legalEntity" key={entity.id || index}>
-            <summary className="legalEntityHeading">
-              <span className="legalEntityNumber">{index + 1}</span>
-              <span className="legalEntitySummaryText">
-                <strong>{entity.name || `Razon social ${index + 1}`}</strong>
-                <small>{entity.email || "Sin correo cargado"}</small>
-              </span>
-              <ChevronDown className="legalEntityChevron" size={19} aria-hidden="true" />
+        {form.map((entity, index) => {
+          const documentCount = ["afip", "iibb"].filter((key) => entity[key]?.data).length;
+          return (
+          <details className="card recordDisclosure legalEntityCard" key={entity.id || index}>
+            <summary className="recordDisclosureSummary legalEntityHeading">
+              <div>
+                <h3>{entity.name || `Razon social ${index + 1}`}</h3>
+                <p>{entity.cuit || "CUIT sin cargar"}{entity.email ? ` - ${entity.email}` : ""}</p>
+                <small>{documentCount || 0} documentos legales</small>
+              </div>
+              <div className="recordActions">
+                <span className="status">legal</span>
+                <ChevronDown className="recordDisclosureChevron" size={19} aria-hidden="true" />
+              </div>
             </summary>
-            <div className="legalEntityBody">
+            <div className="recordDisclosureBody legalEntityBody">
               <div className="legalEntityFields">
-                <div>
-                  <label>Razon social</label>
-                  <input value={entity.name || ""} onChange={(event) => updateEntity(index, { name: event.target.value })} placeholder={`Razon social ${index + 1}`} />
-                </div>
-                <div>
-                  <label>Correo</label>
-                  <input type="email" value={entity.email || ""} onChange={(event) => updateEntity(index, { email: event.target.value })} placeholder="documentacion@empresa.com" />
-                </div>
+                {canEdit ? (
+                  <>
+                    <div><label>Razon social</label><input value={entity.name || ""} onChange={(event) => updateEntity(index, { name: event.target.value })} /></div>
+                    <div><label>CUIT</label><input value={entity.cuit || ""} onChange={(event) => updateEntity(index, { cuit: event.target.value })} /></div>
+                    <div><label>Correo</label><input type="email" value={entity.email || ""} onChange={(event) => updateEntity(index, { email: event.target.value })} placeholder="documentacion@empresa.com" /></div>
+                  </>
+                ) : (
+                  <>
+                    <div><span>Razon social</span><b>{entity.name}</b></div>
+                    <div><span>CUIT</span><b>{entity.cuit}</b></div>
+                    {entity.email ? <div><span>Correo</span><b>{entity.email}</b></div> : null}
+                  </>
+                )}
               </div>
               <div className="legalEntityDocs">
                 {[{ key: "afip", label: "AFIP" }, { key: "iibb", label: "IIBB" }].map((documentType) => {
@@ -2167,9 +2436,9 @@ function LegalEntitiesPanel({ entities, onSave }) {
                     <div className="legalEntityDoc" key={documentType.key}>
                       <div><b>{documentType.label}</b><small>{document?.name || "Sin archivo cargado"}</small></div>
                       <div className="docActions">
-                        <label className="linkUpload">{document?.data ? "Reemplazar archivo" : "Subir PDF o foto"}<input type="file" accept="application/pdf,image/jpeg,image/png,image/webp,.pdf,.jpg,.jpeg,.png,.webp" onChange={(event) => updateDocument(index, documentType.key, event.target.files?.[0])} /></label>
-                        {document?.data ? <a href={document.data} download={document.name}>Ver adjunto</a> : null}
-                        {document?.data ? <button className="documentRemove" type="button" onClick={() => updateEntity(index, { [documentType.key]: null })}>Quitar</button> : null}
+                        {canEdit ? <label className="linkUpload">{document?.data ? "Reemplazar archivo" : "Subir PDF o foto"}<input type="file" accept="application/pdf,image/jpeg,image/png,image/webp,.pdf,.jpg,.jpeg,.png,.webp" onChange={(event) => updateDocument(index, documentType.key, event.target.files?.[0])} /></label> : null}
+                        {document?.data ? <AttachmentButton file={document} label="Ver adjunto" className="linkButton" /> : null}
+                        {canEdit && document?.data ? <button className="documentRemove" type="button" onClick={() => updateEntity(index, { [documentType.key]: null })}>Quitar</button> : null}
                       </div>
                     </div>
                   );
@@ -2178,10 +2447,11 @@ function LegalEntitiesPanel({ entities, onSave }) {
               {entity.email ? <a className="legalEntityEmail" href={`mailto:${entity.email}`}>Escribir a {entity.email}</a> : null}
             </div>
           </details>
-        ))}
+          );
+        })}
       </div>
       <div className="actions legalEntitiesActions">
-        <button className="btn primary" disabled={saving}>{saving ? "Guardando..." : "Guardar documentacion"}</button>
+        {canEdit ? <button className="btn primary" disabled={saving}>{saving ? "Guardando..." : "Guardar documentacion"}</button> : null}
       </div>
     </form>
   );
@@ -2269,7 +2539,7 @@ function VehicleForm({ vehicle, onCancel, onSave }) {
                 {doc.file?.data ? "Reemplazar archivo" : "Subir PDF o foto"}
                 <input type="file" accept="application/pdf,image/jpeg,image/png,image/webp,.pdf,.jpg,.jpeg,.png,.webp" onChange={(event) => addDocFile(index, event.target.files?.[0])} />
               </label>
-              {doc.file?.data ? <a href={doc.file.data} download={doc.file.name}>Ver adjunto</a> : <span>Sin archivo cargado</span>}
+              {doc.file?.data ? <AttachmentButton file={doc.file} label="Ver adjunto" className="linkButton" /> : <span>Sin archivo cargado</span>}
               <span className={`docExpiry ${daysUntil(doc.expiry) < 0 ? "expired" : ""}`}>{doc.expiry ? (daysUntil(doc.expiry) < 0 ? "Vencido" : `${daysUntil(doc.expiry)} dias`) : "Sin vencimiento"}</span>
             </div>
           </article>
@@ -2389,7 +2659,7 @@ function DriverForm({ driver, linkedUser, onCancel, onSave }) {
       <div className="documentsList">
         {form.docs.length ? form.docs.map((doc) => (
           <div className="documentItem" key={doc.id}>
-            <a href={doc.data} download={doc.name}>{doc.name}</a>
+            <AttachmentButton file={doc} label={doc.name} className="attachmentNameButton" />
             <button className="btn" type="button" onClick={() => removeDocument(doc.id)}>Quitar</button>
           </div>
         )) : <span>No hay documentacion adjunta.</span>}
@@ -2402,8 +2672,113 @@ function DriverForm({ driver, linkedUser, onCancel, onSave }) {
   );
 }
 
-function SettingsPanel({ user, users, db, token, revision, onUsers, onUser, onNotify }) {
+function ContactsPanel({ users = [], currentUser }) {
+  const contacts = users
+    .filter((user) => user.id !== currentUser?.id)
+    .filter((user) => user.phone || normalizedRole(user.role) !== "chofer")
+    .sort((a, b) => String(a.name || a.username).localeCompare(String(b.name || b.username)));
+  return (
+    <>
+      <div className="toolbar">
+        <div>
+          <span className="eyebrow">CONTACTOS</span>
+          <h2>Usuarios del equipo</h2>
+        </div>
+      </div>
+      <section className="grid contactsGrid">
+        {contacts.length ? contacts.map((contact) => {
+          const href = phoneHref(contact.phone);
+          return (
+            <article className="card contactCard" key={contact.id}>
+              <div>
+                <span className="eyebrow">{roleLabel(contact.role)}</span>
+                <h3>{contact.name || contact.username}</h3>
+                <p>{contact.phone || "Sin telefono cargado"}</p>
+              </div>
+              {href ? <a className="btn primary" href={href}><Phone size={15} /> Llamar</a> : <span className="status">Sin telefono</span>}
+            </article>
+          );
+        }) : <div className="empty">Todavia no hay contactos con telefono cargado.</div>}
+      </section>
+    </>
+  );
+}
+
+function ProfilePanel({ user, currentDriver, onSave }) {
+  const [form, setForm] = useState({
+    name: user.name || "",
+    phone: user.phone || currentDriver?.phone || "",
+    password: "",
+  });
+  const [saving, setSaving] = useState(false);
+
+  useEffect(() => {
+    setForm({
+      name: user.name || "",
+      phone: user.phone || currentDriver?.phone || "",
+      password: "",
+    });
+  }, [user, currentDriver]);
+
+  function update(name, value) {
+    setForm((current) => ({ ...current, [name]: value }));
+  }
+
+  async function submit(event) {
+    event.preventDefault();
+    if (form.password && form.password.length < 4) {
+      alert("La contrasena debe tener al menos 4 digitos.");
+      return;
+    }
+    setSaving(true);
+    try {
+      const saved = await onSave({
+        name: form.name.trim(),
+        phone: form.phone.trim(),
+        password: form.password,
+      });
+      if (saved) update("password", "");
+    } finally {
+      setSaving(false);
+    }
+  }
+
+  return (
+    <>
+      <div className="toolbar">
+        <div>
+          <span className="eyebrow">MI PERFIL</span>
+          <h2>Datos de acceso</h2>
+        </div>
+      </div>
+      <form className="card editorForm profileCard" onSubmit={submit}>
+        <div className="formTitle">
+          <div>
+            <span className="eyebrow">{roleLabel(user.role)}</span>
+            <h2>{user.username}</h2>
+          </div>
+        </div>
+        <div className="row">
+          <div><label>Nombre</label><input value={form.name} onChange={(event) => update("name", event.target.value)} required /></div>
+          <div><label>Telefono</label><input value={form.phone} onChange={(event) => update("phone", event.target.value)} inputMode="tel" /></div>
+        </div>
+        <div>
+          <label>Nueva contrasena <small>(opcional)</small></label>
+          <input type="password" value={form.password} onChange={(event) => update("password", event.target.value)} placeholder="Dejar vacio para no cambiar" />
+        </div>
+        <div className="actions">
+          <button className="btn primary" disabled={saving}>{saving ? "Guardando..." : "Guardar perfil"}</button>
+        </div>
+      </form>
+    </>
+  );
+}
+
+function SettingsPanel({ user, users, db, token, revision, onUsers, onUser, onNotify, onTestPush }) {
   const [editingUser, setEditingUser] = useState(null);
+  const [pushDevices, setPushDevices] = useState([]);
+  const [lastTaskNotification, setLastTaskNotification] = useState(null);
+  const [loadingPushDevices, setLoadingPushDevices] = useState(false);
 
   async function saveUser(payload) {
     const response = await appFetch("/api/users", {
@@ -2421,6 +2796,25 @@ function SettingsPanel({ user, users, db, token, revision, onUsers, onUser, onNo
     setEditingUser(null);
     onNotify(payload.id ? "Usuario actualizado" : "Usuario creado");
   }
+
+  async function loadPushDevices() {
+    setLoadingPushDevices(true);
+    try {
+      const response = await appFetch("/api/push/devices", { headers: apiHeaders(token, { accept: "application/json" }) });
+      const result = await response.json().catch(() => ({}));
+      if (!response.ok) throw new Error(result.error || "No se pudo leer el diagnostico");
+      setPushDevices(result.devices || []);
+      setLastTaskNotification(result.lastTaskNotification || null);
+    } catch (error) {
+      onNotify(error.message || "No se pudo leer el diagnostico", "error");
+    } finally {
+      setLoadingPushDevices(false);
+    }
+  }
+
+  useEffect(() => {
+    if (token) loadPushDevices();
+  }, [token]);
 
   return (
     <>
@@ -2451,6 +2845,44 @@ function SettingsPanel({ user, users, db, token, revision, onUsers, onUser, onNo
           <span className="eyebrow">SINCRONIZACION</span>
           <h2>Base compartida</h2>
           <p>Revision actual: {revision}</p>
+        </article>
+        <article className="card pushDiagnostics">
+          <div className="record">
+            <div>
+              <span className="eyebrow">AVISOS</span>
+              <h2>Dispositivos</h2>
+              <p>{pushDevices.length ? `${pushDevices.length} dispositivo${pushDevices.length === 1 ? "" : "s"} registrado${pushDevices.length === 1 ? "" : "s"}` : "Sin dispositivos registrados"}</p>
+            </div>
+            <div className="recordActions">
+              <button className="btn" type="button" onClick={loadPushDevices} disabled={loadingPushDevices}>{loadingPushDevices ? "Leyendo..." : "Actualizar"}</button>
+              <button className="btn" type="button" onClick={async () => { await onTestPush(); await loadPushDevices(); }}>Probar</button>
+            </div>
+          </div>
+          {pushDevices.length ? (
+            <div className="pushDeviceList">
+              {pushDevices.map((device) => (
+                <div className="pushDevice" key={device.id}>
+                  <div>
+                    <b>{device.username}</b>
+                    <small>{device.platform} - {device.browser}{device.standalone ? " - app instalada" : ""}</small>
+                  </div>
+                  <span className={`status ${device.lastPushOk === false ? "danger" : ""}`}>{device.lastPushOk === null ? "sin prueba" : device.lastPushOk ? `ok ${device.lastPushStatus || ""}` : device.lastPushError || "fallo"}</span>
+                </div>
+              ))}
+            </div>
+          ) : null}
+          {lastTaskNotification ? (
+            <div className="pushLastTask">
+              <p className="muted smallText">Ultima tarea: {lastTaskNotification.sent || 0}/{lastTaskNotification.total || 0} avisos enviados{lastTaskNotification.title ? ` - ${lastTaskNotification.title}` : ""}</p>
+              <small>
+                origen: {lastTaskNotification.source || "-"} · subs: {lastTaskNotification.subscriptions ?? "-"} · endpoints: {lastTaskNotification.endpoints ?? "-"} · targets: {lastTaskNotification.targets ?? "-"}
+                {lastTaskNotification.settingsSubscriptions !== undefined ? ` · settings: ${lastTaskNotification.settingsSubscriptions}` : ""}
+                {lastTaskNotification.recordSubscriptions !== undefined ? ` · registros: ${lastTaskNotification.recordSubscriptions}` : ""}
+                {lastTaskNotification.retried ? " · reintento" : ""}
+                {lastTaskNotification.error ? ` · error: ${lastTaskNotification.error}` : ""}
+              </small>
+            </div>
+          ) : null}
         </article>
         {users.map((item) => (
           <article className="card record" key={item.id}>

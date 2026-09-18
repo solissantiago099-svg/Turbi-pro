@@ -1044,8 +1044,42 @@ textarea {
   color: var(--green-dark);
 }
 
+.status.danger {
+  background: #fff0f0;
+  border-color: #e8b6b6;
+  color: var(--danger);
+}
+
 .notificationButton {
   background: #fffdf8;
+}
+
+.pushDiagnostics {
+  gap: 12px;
+}
+
+.pushDeviceList {
+  display: grid;
+  gap: 8px;
+  margin-top: 12px;
+}
+
+.pushDevice {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  border-top: 1px solid var(--line);
+  padding-top: 10px;
+}
+
+.pushDevice > div {
+  display: grid;
+  gap: 3px;
+}
+
+.pushDevice small {
+  color: var(--muted);
 }
 
 .empty {
@@ -1490,11 +1524,179 @@ textarea {
   gap: 3px;
 }
 
-.vehicleDocumentPreview a {
+.vehicleDocumentPreview a,
+.linkButton,
+.attachmentNameButton {
+  appearance: none;
+  background: transparent;
+  border: 0;
   color: var(--plum);
+  cursor: pointer;
   font-size: 12px;
   font-weight: 900;
+  padding: 0;
+  text-align: left;
 }
+
+.attachmentNameButton {
+  font-size: 13px;
+  overflow-wrap: anywhere;
+}
+
+.attachmentModal {
+  align-items: stretch;
+  display: flex;
+  inset: 0;
+  justify-content: center;
+  padding: 0;
+  position: fixed;
+  z-index: 400;
+}
+
+.attachmentBackdrop {
+  background: rgba(10, 13, 18, .88);
+  border: 0;
+  cursor: pointer;
+  inset: 0;
+  position: absolute;
+}
+
+.attachmentViewer {
+  align-self: center;
+  display: grid;
+  grid-template-rows: auto minmax(0, 1fr);
+  overflow: hidden;
+  position: relative;
+  z-index: 1;
+}
+
+.attachmentViewer.imageViewer {
+  background: transparent;
+  height: 100dvh;
+  max-height: 100dvh;
+  width: 100vw;
+}
+
+.attachmentViewer.documentViewer {
+  background: #fffdf8;
+  border: 1px solid #e5dccf;
+  border-radius: 12px;
+  box-shadow: 0 18px 60px rgba(18, 27, 38, .3);
+  max-height: min(760px, calc(100dvh - 36px));
+  max-width: min(920px, calc(100vw - 36px));
+  width: 100%;
+}
+
+.attachmentViewer header {
+  align-items: center;
+  display: flex;
+  gap: 10px;
+  justify-content: space-between;
+  padding: 12px;
+}
+
+.attachmentViewer.documentViewer header {
+  border-bottom: 1px solid #e5dccf;
+  padding: 12px 14px;
+}
+
+.attachmentViewer.imageViewer header {
+  color: #fff;
+  left: 0;
+  position: absolute;
+  right: 0;
+  top: 0;
+  z-index: 2;
+}
+
+.attachmentViewer.imageViewer header b {
+  background: rgba(10, 13, 18, .52);
+  border-radius: 999px;
+  max-width: min(70vw, 520px);
+  padding: 9px 13px;
+}
+
+.attachmentViewer.imageViewer header .iconBtn {
+  background: rgba(255, 255, 255, .12);
+  border-color: rgba(255, 255, 255, .28);
+  color: #fff;
+}
+
+.attachmentViewer header b {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.attachmentFrame {
+  align-items: center;
+  display: flex;
+  justify-content: center;
+  overflow: auto;
+}
+
+.documentViewer .attachmentFrame {
+  background: #f6f0e5;
+  min-height: min(620px, calc(100dvh - 104px));
+}
+
+.imageViewer .attachmentFrame {
+  background: transparent;
+  height: 100dvh;
+  padding: 64px 12px 24px;
+}
+
+.attachmentFrame img {
+  display: block;
+  height: auto;
+  max-height: calc(100dvh - 96px);
+  max-width: 100%;
+  object-fit: contain;
+  width: auto;
+}
+
+.attachmentFrame iframe {
+  border: 0;
+  height: min(680px, calc(100dvh - 104px));
+  width: 100%;
+}
+
+.attachmentFrame p {
+  color: var(--muted);
+  padding: 24px;
+}
+
+@media (max-width: 600px) {
+  .attachmentViewer.documentViewer {
+    align-self: stretch;
+    border: 0;
+    border-radius: 0;
+    max-height: 100dvh;
+    max-width: 100vw;
+  }
+
+  .documentViewer .attachmentFrame {
+    min-height: calc(100dvh - 57px);
+  }
+
+  .attachmentFrame iframe {
+    height: calc(100dvh - 57px);
+  }
+
+  .imageViewer .attachmentFrame {
+    padding: 58px 8px 18px;
+  }
+
+  .attachmentViewer.imageViewer header {
+    padding: 10px;
+  }
+
+  .attachmentViewer.imageViewer header b {
+    font-size: 13px;
+    max-width: calc(100vw - 76px);
+  }
+}
+
 .editorForm {
   margin-bottom: 14px;
   box-shadow: var(--shadow-md);
@@ -1561,19 +1763,28 @@ textarea {
 }
 
 .legalEntitiesCard {
-  margin-bottom: 18px;
+  display: grid;
+  gap: 12px;
 }
 
-.legalEntitiesTitle p {
-  margin: 6px 0 0;
-  color: var(--muted);
+.utilitySections {
+  display: grid;
+  gap: 20px;
+}
+
+.utilityBlock {
+  display: grid;
+  gap: 10px;
 }
 
 .legalEntitiesGrid {
   display: grid;
   grid-template-columns: repeat(2, minmax(0, 1fr));
   gap: 12px;
-  margin-top: 16px;
+}
+
+.legalEntityCard {
+  margin: 0;
 }
 
 .legalEntity {
@@ -1619,9 +1830,30 @@ textarea {
 .legalEntityBody {
   display: grid;
   gap: 12px;
-  border-top: 1px solid var(--line);
-  padding-top: 12px;
 }
+
+.legalEntityFields > div {
+  display: grid;
+  gap: 4px;
+  border: 1px solid #e5dccf;
+  border-radius: 8px;
+  padding: 10px;
+  background: #fffdf8;
+}
+
+.legalEntityFields span {
+  color: var(--muted);
+  font-family: var(--font-mono);
+  font-size: 11px;
+  font-weight: 900;
+  text-transform: uppercase;
+}
+
+.legalEntityFields b {
+  color: var(--ink);
+  font-size: 16px;
+}
+
 .legalEntityNumber {
   display: grid;
   place-items: center;
@@ -1642,7 +1874,11 @@ textarea {
 }
 
 .legalEntityFields {
-  grid-template-columns: 1fr;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+}
+
+.legalEntityFields > div:nth-child(3) {
+  grid-column: 1 / -1;
 }
 
 .legalEntityDocs {
@@ -1710,8 +1946,39 @@ textarea {
 }
 
 .legalEntitiesActions {
+  display: flex;
+  justify-content: flex-end;
+  margin-top: 0;
+}
+
+.legalEntitiesActions:empty {
   display: none;
 }
+
+.contactsGrid {
+  align-items: stretch;
+}
+
+.contactCard {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 14px;
+}
+
+.contactCard h3 {
+  margin: 5px 0;
+}
+
+.contactCard p {
+  margin: 0;
+  color: var(--muted);
+}
+
+.profileCard {
+  max-width: 780px;
+}
+
 .vehicleDocs {
   display: grid;
   gap: 10px;
@@ -2102,6 +2369,15 @@ textarea {
   .legalEntitiesActions {
     display: flex;
   }
+
+  .legalEntitiesActions:empty {
+    display: none;
+  }
+
+  .contactCard {
+    align-items: flex-start;
+    flex-direction: column;
+  }
   .week {
     display: flex;
     overflow-x: auto;
@@ -2301,19 +2577,93 @@ textarea {
     min-height: 40px;
   }
 
-  .installIcon {
-    width: 40px;
-    height: 40px;
-  }
+.installIcon {
+  width: 40px;
+  height: 40px;
+}
 }
 
-.taskNotifications { position: relative; }
-.taskNotifications > button { position: relative; overflow: visible; }
-.notificationBadge { position: absolute; top: -8px; right: -8px; min-width: 22px; height: 22px; padding: 0 5px; border-radius: 50%; background: #dc2626; color: white; display: flex; align-items: center; justify-content: center; font-size: 12px; font-weight: 700; border: 2px solid white; }
-.notificationPanel { position: absolute; right: 0; top: 48px; z-index: 100; width: min(360px, calc(100vw - 32px)); background: white; color: #17212d; border: 1px solid #dbe2ea; border-radius: 14px; box-shadow: 0 12px 36px #0003; padding: 14px; }
-.notificationPanel header { display: flex; align-items: center; justify-content: space-between; margin-bottom: 12px; }
-.notificationList { max-height: 360px; overflow-y: auto; margin-top: 10px; }
-.notificationItem { display: grid; gap: 5px; text-align: left; width: 100%; padding: 12px; border: 0; border-bottom: 1px solid #e2e8f0; background: white; color: inherit; cursor: pointer; overflow-wrap: anywhere; }
-.notificationItem.unread { background: #eff6ff; border-left: 3px solid #dc2626; }
-.notificationItem small { color: #526174; }
-@media (max-width: 600px) { .notificationPanel { position: fixed; top: 100px; right: 16px; } }
+.taskNotifications {
+  position: relative;
+}
+
+.taskNotifications > button {
+  overflow: visible;
+  position: relative;
+}
+
+.notificationBadge {
+  align-items: center;
+  background: #dc2626;
+  border: 2px solid #fff;
+  border-radius: 50%;
+  color: #fff;
+  display: flex;
+  font-size: 12px;
+  font-weight: 700;
+  height: 22px;
+  justify-content: center;
+  min-width: 22px;
+  padding: 0 5px;
+  position: absolute;
+  right: -8px;
+  top: -8px;
+}
+
+.notificationPanel {
+  background: #fff;
+  border: 1px solid #dbe2ea;
+  border-radius: 14px;
+  box-shadow: 0 12px 36px #0003;
+  color: #17212d;
+  padding: 14px;
+  position: absolute;
+  right: 0;
+  top: 48px;
+  width: min(360px, calc(100vw - 32px));
+  z-index: 100;
+}
+
+.notificationPanel header {
+  align-items: center;
+  display: flex;
+  justify-content: space-between;
+  margin-bottom: 12px;
+}
+
+.notificationList {
+  margin-top: 10px;
+  max-height: 360px;
+  overflow-y: auto;
+}
+
+.notificationItem {
+  background: #fff;
+  border: 0;
+  border-bottom: 1px solid #e2e8f0;
+  color: inherit;
+  cursor: pointer;
+  display: grid;
+  gap: 5px;
+  overflow-wrap: anywhere;
+  padding: 12px;
+  text-align: left;
+  width: 100%;
+}
+
+.notificationItem.unread {
+  background: #eff6ff;
+  border-left: 3px solid #dc2626;
+}
+
+.notificationItem small {
+  color: #526174;
+}
+
+@media (max-width: 600px) {
+  .notificationPanel {
+    position: fixed;
+    right: 16px;
+    top: 100px;
+  }
+}
