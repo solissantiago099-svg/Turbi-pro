@@ -932,6 +932,10 @@ async function saveTask(request, env, mode, ctx) {
   if (!user) return Response.json({ error: "Se requiere inicio de sesion" }, { status: 401 });
   await migrateLegacyState(env);
   const payload = await request.json();
+  const voiceNote = payload?.voiceNote;
+  if (voiceNote && (typeof voiceNote !== "object" || !String(voiceNote.data || "").startsWith("data:audio/") || Number(voiceNote.size) > 1500000 || String(voiceNote.data).length > 2100000)) {
+    return Response.json({ error: "El audio debe ser valido y no superar 1,5 MB." }, { status: 400 });
+  }
   const nextTask = { ...payload, updatedAt: new Date().toISOString() };
   const existing = mode === "create" ? null : await readRecord(env, "task", nextTask.id);
   if (mode !== "create" && !existing) return Response.json({ error: "Tarea inexistente" }, { status: 404 });
@@ -1002,6 +1006,40 @@ async function updateTaskStatus(request, env) {
   return stateResponse(env, user);
 }
 
+async function rolloverTasks(request, env) {
+  const user = await currentUser(request, env);
+  if (!user) return Response.json({ error: "Se requiere inicio de sesion" }, { status: 401 });
+  if (!["admin", "usuario"].includes(normalizedRole(user.role))) return Response.json({ error: "No autorizado" }, { status: 403 });
+  await migrateLegacyState(env);
+  const payload = await request.json().catch(() => ({}));
+  const sourceDate = String(payload.date || "");
+  const destination = String(payload.targetDate || "");
+  const ids = Array.isArray(payload.ids) ? [...new Set(payload.ids.map(String))] : [];
+  const source = /^\d{4}-\d{2}-\d{2}$/.test(sourceDate) ? new Date(sourceDate + "T12:00:00Z") : null;
+  const target = /^\d{4}-\d{2}-\d{2}$/.test(destination) ? new Date(destination + "T12:00:00Z") : null;
+  if (!source || !target || Number.isNaN(source.getTime()) || Number.isNaN(target.getTime()) || source.toISOString().slice(0, 10) !== sourceDate || target.toISOString().slice(0, 10) !== destination || destination <= sourceDate || !ids.length || ids.length > 100) {
+    return Response.json({ error: "Elegí una fecha futura y tareas válidas." }, { status: 400 });
+  }
+  const tasks = [];
+  for (const id of ids) {
+    const task = await readRecord(env, "task", id);
+    if (!task || task.date !== sourceDate || task.isScheduleBlock || ["realizada", "cancelada"].includes(task.status)) {
+      return Response.json({ error: "La agenda cambio. Actualizala antes de pasar las tareas." }, { status: 409 });
+    }
+    if (!canEditTaskRecord(task, user)) return Response.json({ error: "Solo podes pasar las tareas que asignaste o administrar." }, { status: 403 });
+    tasks.push(task);
+  }
+  const updatedAt = new Date().toISOString();
+  const statements = tasks.map((task) => {
+    const nextTask = { ...task, date: destination, start: "", scheduleMode: "unscheduled", updatedAt };
+    return env.DB.prepare("UPDATE app_records SET value = ?, date = ?, start = ?, updated_at = ? WHERE type = ? AND id = ?")
+      .bind(JSON.stringify(nextTask), destination, null, updatedAt, "task", String(task.id));
+  });
+  await env.DB.batch(statements);
+  const meta = await bumpRevision(env, user);
+  await audit(env, user, "rollover-tasks", "task", sourceDate, { count: tasks.length, destination, revision: meta.revision });
+  return stateResponse(env, user);
+}
 async function scheduleTaskRecord(request, env) {
   const user = await currentUser(request, env);
   if (!user) return Response.json({ error: "Se requiere inicio de sesion" }, { status: 401 });
@@ -1116,6 +1154,7 @@ export default {
     if (url.pathname === "/api/tasks" && request.method === "PUT") return saveTask(request, env, "edit", ctx);
     if (url.pathname === "/api/tasks" && request.method === "DELETE") return deleteTaskRecord(request, env);
     if (url.pathname === "/api/tasks/status" && request.method === "PUT") return updateTaskStatus(request, env);
+    if (url.pathname === "/api/tasks/rollover" && request.method === "PUT") return rolloverTasks(request, env);
     if (url.pathname === "/api/tasks/schedule" && request.method === "PUT") return scheduleTaskRecord(request, env);
     if (url.pathname === "/api/drivers" && ["POST", "PUT"].includes(request.method)) return saveRecordEndpoint(request, env, "driver");
     if (url.pathname === "/api/vehicles" && ["POST", "PUT"].includes(request.method)) return saveRecordEndpoint(request, env, "vehicle");

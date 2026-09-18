@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useMemo, useRef, useState } from "react";
-import { Bell, CalendarDays, ChevronDown, ChevronLeft, ChevronRight, Download, Edit3, FileText, LogOut, MapPin, Menu, Phone, Plus, Printer, Route, Search, Settings, Trash2, UserCircle, UserPlus, Users, X } from "lucide-react";
+import { Bell, CalendarDays, ChevronDown, ChevronLeft, ChevronRight, Download, Edit3, FileText, LogOut, MapPin, Menu, Mic, Phone, Plus, Printer, Route, Search, Settings, Trash2, UserCircle, UserPlus, Users, X } from "lucide-react";
 import TaskNotifications from "./TaskNotifications";
 
 const VAPID_PUBLIC_KEY = "BOgzmxTmjpL2edxhwwe1W0MYXq_NsI-4NiJm2uNYJdMNM9HZgFNIxP6yrGJSmtnfa-aVEmAlr6nn8Q-zbQEAm7g";
@@ -28,6 +28,11 @@ function addDays(days) {
   return localISO(date);
 }
 
+function nextDayISO(iso) {
+  const date = new Date(`${iso}T12:00:00`);
+  date.setDate(date.getDate() + 1);
+  return localISO(date);
+}
 function formatTime24(value) {
   const [hours = "0", minutes = "0"] = String(value || "00:00").split(":");
   return `${String(Number(hours)).padStart(2, "0")}:${String(Number(minutes)).padStart(2, "0")} HS`;
@@ -300,6 +305,110 @@ function AttachmentButton({ file, label = "Ver adjunto", className = "btn" }) {
   );
 }
 
+function VoiceNotePlayer({ note }) {
+  const [open, setOpen] = useState(false);
+  const audioRef = useRef(null);
+  if (!note?.data) return null;
+  function listen() {
+    setOpen(true);
+    window.setTimeout(() => { const playback = audioRef.current?.play(); playback?.catch(() => {}); }, 0);
+  }
+  return (
+    <div className="voiceNotePlayer">
+      <button className="btn" type="button" onClick={listen}><Mic size={15} /> Escuchar audio</button>
+      {open ? <audio ref={audioRef} controls preload="none" src={note.data} aria-label="Audio de la tarea" /> : null}
+    </div>
+  );
+}
+
+function VoiceNoteEditor({ value, onChange, onError, onRecordingChange }) {
+  const recorderRef = useRef(null);
+  const streamRef = useRef(null);
+  const timeoutRef = useRef(null);
+  const [recording, setRecording] = useState(false);
+
+  useEffect(() => () => {
+    window.clearTimeout(timeoutRef.current);
+    if (recorderRef.current?.state === "recording") {
+      recorderRef.current.onstop = null;
+      recorderRef.current.stop();
+    }
+    streamRef.current?.getTracks().forEach((track) => track.stop());
+  }, []);
+
+  async function setAudioFile(file) {
+    if (!file) return;
+    if (!file.type.startsWith("audio/") && !/\.(mp3|m4a|wav|webm|ogg)$/i.test(file.name)) {
+      onError("Selecciona un archivo de audio valido.");
+      return;
+    }
+    if (file.size > 1500000) {
+      onError("El audio supera el maximo de 1,5 MB. Graba una nota mas corta.");
+      return;
+    }
+    const fallbackType = /\.m4a$/i.test(file.name) ? "audio/mp4" : /\.wav$/i.test(file.name) ? "audio/wav" : /\.ogg$/i.test(file.name) ? "audio/ogg" : /\.webm$/i.test(file.name) ? "audio/webm" : "audio/mpeg";
+    const typedFile = file.type ? file : new File([file], file.name, { type: fallbackType });
+    onChange({ name: typedFile.name, size: typedFile.size, type: typedFile.type, data: await fileToDataURL(typedFile) });
+  }
+
+  async function startRecording() {
+    if (!navigator.mediaDevices?.getUserMedia || typeof MediaRecorder === "undefined") {
+      onError("Este navegador no permite grabar audio. Podes subir un archivo de audio.");
+      return;
+    }
+    try {
+      const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+      streamRef.current = stream;
+      const preferredType = ["audio/webm;codecs=opus", "audio/mp4", "audio/webm"].find((type) => MediaRecorder.isTypeSupported?.(type));
+      const recorder = new MediaRecorder(stream, preferredType ? { mimeType: preferredType } : undefined);
+      recorderRef.current = recorder;
+      const chunks = [];
+      recorder.ondataavailable = (event) => { if (event.data.size) chunks.push(event.data); };
+      recorder.onstop = async () => {
+        window.clearTimeout(timeoutRef.current);
+        stream.getTracks().forEach((track) => track.stop());
+        streamRef.current = null;
+        setRecording(false);
+        onRecordingChange(false);
+        const blob = new Blob(chunks, { type: recorder.mimeType || chunks[0]?.type || "audio/webm" });
+        if (!blob.size) { onError("No se pudo grabar el audio. Intentalo de nuevo."); return; }
+        const extension = blob.type.includes("mp4") ? "m4a" : "webm";
+        try { await setAudioFile(new File([blob], `audio-tarea.${extension}`, { type: blob.type })); } catch { onError("No se pudo preparar el audio. Intentalo de nuevo."); }
+      };
+      recorder.onerror = () => onError("Se interrumpio la grabacion. Intentalo de nuevo.");
+      recorder.start(1000);
+      setRecording(true);
+      onRecordingChange(true);
+      timeoutRef.current = window.setTimeout(() => recorder.state === "recording" && recorder.stop(), 60000);
+    } catch {
+      streamRef.current?.getTracks().forEach((track) => track.stop());
+      streamRef.current = null;
+      onError("No se pudo acceder al microfono. Revisa el permiso del navegador.");
+    }
+  }
+
+  function stopRecording() {
+    if (recorderRef.current?.state === "recording") recorderRef.current.stop();
+  }
+
+  return (
+    <div className="voiceNoteEditor">
+      <label>Audio de la tarea <small>(opcional - hasta 1 minuto o 1,5 MB)</small></label>
+      <div className="voiceNoteActions">
+        <button className={`btn ${recording ? "recording" : ""}`} type="button" onClick={recording ? stopRecording : startRecording}>
+          <Mic size={16} /> {recording ? "Detener grabacion" : value?.data ? "Volver a grabar" : "Grabar audio"}
+        </button>
+        <label className="btn voiceNoteUpload">
+          Subir audio
+          <input type="file" accept="audio/*,.mp3,.m4a,.wav,.webm,.ogg" onChange={(event) => setAudioFile(event.target.files?.[0])} />
+        </label>
+        {value?.data ? <button className="btn" type="button" onClick={() => onChange(null)}>Quitar audio</button> : null}
+      </div>
+      {recording ? <small className="recordingHint">Grabando... toca Detener cuando termines.</small> : null}
+      {value?.data ? <audio controls preload="none" src={value.data} aria-label="Vista previa del audio de la tarea" /> : null}
+    </div>
+  );
+}
 function PrintAttachmentButton({ file, label = "Imprimir adjunto", className = "btn" }) {
   if (!file?.data) return null;
   return <button className={className} type="button" onClick={() => printAttachment(file)}><Printer size={15} /> {label}</button>;
@@ -660,6 +769,7 @@ export default function Home() {
     () => db.tasks.filter((task) => task.date === selectedDate).sort((a, b) => String(a.start).localeCompare(String(b.start))),
     [db.tasks, selectedDate],
   );
+
 
   const routeTasks = useMemo(
     () => db.tasks.filter((task) => task.date === routeDate && Number(task.driverId || driverId) === Number(driverId)),
@@ -1096,7 +1206,36 @@ export default function Home() {
     }, "edit");
   }
 
-  async function updateTask(task, status) {
+  async function moveTaskToFutureDay(task, destination) {
+    if (!task || task.isScheduleBlock || ["realizada", "cancelada"].includes(task.status) || !canEditTask(task, user)) {
+      notify("Esta tarea no se puede pasar de día.", "error");
+      return false;
+    }
+    if (!destination || destination <= task.date) {
+      notify("Elegí una fecha posterior a la de la tarea.", "error");
+      return false;
+    }
+    const destinationLabel = new Date(destination + "T12:00:00").toLocaleDateString("es-AR", { weekday: "long", day: "numeric", month: "long" });
+    if (!window.confirm('¿Pasar "' + (task.title || task.description || "esta tarea") + '" al ' + destinationLabel + '? Quedará sin horario para reprogramarla.')) return false;
+    const updatedAt = new Date().toISOString();
+    const nextDb = {
+      ...db,
+      tasks: db.tasks.map((item) => String(item.id) === String(task.id) ? {
+        ...item,
+        date: destination,
+        start: "",
+        scheduleMode: "unscheduled",
+        updatedAt,
+      } : item),
+    };
+    try {
+      await savePartial("/api/tasks/rollover", "PUT", { date: task.date, targetDate: destination, ids: [String(task.id)] }, nextDb, "Tarea pasada al día elegido");
+      return true;
+    } catch (error) {
+      notify(error.message || "No se pudo pasar la tarea.", "error");
+      return false;
+    }
+  }  async function updateTask(task, status) {
     if (currentRole !== "chofer" || Number(task.driverId || user.currentDriverId) !== Number(user.currentDriverId)) {
       notify("Solo el chofer asignado puede iniciar o finalizar esta tarea.", "error");
       return;
@@ -1387,6 +1526,7 @@ export default function Home() {
                 onStatus={updateTask}
                 onDelete={deleteTask}
                 onSave={editTask}
+                onMove={moveTaskToFutureDay}
                 onEdit={(task) => {
                   setEditingTask(task);
                   setTaskPrefill({ date: task.date, time: task.start });
@@ -1596,6 +1736,7 @@ function TaskList({ tasks, blocks = [], db, users = [], currentUser, onStatus, o
                 {contactPhone ? <a className="btn" href={contactPhone}><Phone size={15} /> Llamar contacto</a> : null}
                 {driverPhone && normalizedRole(currentUser?.role) !== "chofer" ? <a className="btn" href={driverPhone}><Phone size={15} /> Llamar chofer</a> : null}
                 <AttachmentButton file={task.merchandisePdf} label="Abrir adjunto" />
+                <VoiceNotePlayer note={task.voiceNote} />
                 <PrintAttachmentButton file={task.merchandisePdf} />
                 {!task.start && canSchedule ? <TaskSchedule task={task} onSchedule={onSchedule} /> : null}
                 {canEditTask(task, currentUser) ? <button className="btn" type="button" onClick={() => onEdit(task)}><Edit3 size={15} /> Editar</button> : null}
@@ -1641,7 +1782,7 @@ function TaskSchedule({ task, onSchedule }) {
     </form>
   );
 }
-function DailySchedule({ date, tasks, db, users = [], scheduleBlocks = [], showSummary = true, canCreate, canChangeStatus, currentUser, onFreeSlot, onStatus, onEdit, onDelete, onSave }) {
+function DailySchedule({ date, tasks, db, users = [], scheduleBlocks = [], showSummary = true, canCreate, canChangeStatus, currentUser, onFreeSlot, onStatus, onEdit, onDelete, onSave, onMove }) {
   const hours = Array.from({ length: 13 }, (_, index) => index + 7);
   const outside = tasks.filter((task) => {
     const hour = Number(String(task.start || "00:00").split(":")[0]);
@@ -1666,7 +1807,7 @@ function DailySchedule({ date, tasks, db, users = [], scheduleBlocks = [], showS
                 {hourValue}
               </button>
               <div className="scheduleContent">
-                {hourTasks.length ? hourTasks.map((task) => <DailyTask key={task.id} task={task} db={db} users={users} canOperate={canCreate} canChangeStatus={canChangeStatus} currentUser={currentUser} onStatus={onStatus} onEdit={onEdit} onDelete={onDelete} onSave={onSave} />) : (
+                {hourTasks.length ? hourTasks.map((task) => <DailyTask key={task.id} task={task} db={db} users={users} canOperate={canCreate} canChangeStatus={canChangeStatus} currentUser={currentUser} onStatus={onStatus} onEdit={onEdit} onDelete={onDelete} onSave={onSave} onMove={onMove} />) : (
                   <button className={`freeSlot ${blocked ? "blockedSlot" : ""}`} disabled={!canCreate || Boolean(blocked)} onClick={() => onFreeSlot(hourValue)}>
                     <span>{blocked ? "Horario bloqueado" : "Horario libre"}</span>
                     <small>{blocked ? `${blocked.title || "Bloqueo operativo"} - ${blockTimeLabel(blocked)}` : "Agregar tarea"}</small>
@@ -1680,7 +1821,7 @@ function DailySchedule({ date, tasks, db, users = [], scheduleBlocks = [], showS
           <div className="scheduleRow occupied" key={`outside-${task.id}`}>
             <span className="scheduleTime">{task.start}</span>
             <div className="scheduleContent">
-              <DailyTask task={task} db={db} users={users} canOperate={canCreate} canChangeStatus={canChangeStatus} currentUser={currentUser} onStatus={onStatus} onEdit={onEdit} onDelete={onDelete} onSave={onSave} outside />
+              <DailyTask task={task} db={db} users={users} canOperate={canCreate} canChangeStatus={canChangeStatus} currentUser={currentUser} onStatus={onStatus} onEdit={onEdit} onDelete={onDelete} onSave={onSave} onMove={onMove} outside />
             </div>
           </div>
         ))}
@@ -1689,16 +1830,20 @@ function DailySchedule({ date, tasks, db, users = [], scheduleBlocks = [], showS
   );
 }
 
-function DailyTask({ task, db, users = [], canOperate, canChangeStatus, currentUser, onStatus, onEdit, onDelete, onSave, outside = false }) {
+function DailyTask({ task, db, users = [], canOperate, canChangeStatus, currentUser, onStatus, onEdit, onDelete, onSave, onMove, outside = false }) {
   const [editing, setEditing] = useState(false);
   const [saving, setSaving] = useState(false);
   const [draft, setDraft] = useState(null);
+  const [showMove, setShowMove] = useState(false);
+  const [moveDate, setMoveDate] = useState(() => nextDayISO(task.date));
+  const [moving, setMoving] = useState(false);
   const stops = (task.stops || []).map((stop) => (typeof stop === "string" ? stop : stop.address)).filter(Boolean);
   const title = task.title || task.description || "Tarea sin titulo";
   const description = String(task.description || "").trim();
   const isBlockTask = Boolean(task.isScheduleBlock);
   const assignerLabel = taskAssignerLabel(task);
   const canEdit = canOperate && canEditTask(task, currentUser);
+  const canMove = canEdit && !isBlockTask && !["realizada", "cancelada"].includes(task.status);
   const canOperateThisTask = canChangeStatus && Number(task.driverId || currentUser?.currentDriverId) === Number(currentUser?.currentDriverId);
   const summaryRoute = isBlockTask && task.blockEnd ? `Reservado hasta ${formatTime24(task.blockEnd)}` : [task.origin, task.destination].map(shortAddress).filter(Boolean).join(" -> ");
   const driver = db?.drivers?.find((item) => Number(item.id) === Number(task.driverId || currentUser?.currentDriverId));
@@ -1755,6 +1900,16 @@ function DailyTask({ task, db, users = [], canOperate, canChangeStatus, currentU
     }
   }
 
+  async function submitMove(event) {
+    event.preventDefault();
+    setMoving(true);
+    try {
+      const moved = await onMove(task, moveDate);
+      if (moved) setShowMove(false);
+    } finally {
+      setMoving(false);
+    }
+  }
   return (
     <details className={`dailyTask ${outside ? "outside" : ""} ${task.status === "realizada" ? "completed" : ""} ${task.status === "en-trabajo" ? "active" : ""}`}>
       <summary>
@@ -1806,6 +1961,7 @@ function DailyTask({ task, db, users = [], canOperate, canChangeStatus, currentU
               {driverPhone && normalizedRole(currentUser?.role) !== "chofer" ? <a className="btn" href={driverPhone}><Phone size={15} /> Llamar chofer</a> : null}
               {contactPhone ? <a className="btn" href={contactPhone}><Phone size={15} /> Llamar contacto</a> : null}
               <AttachmentButton file={task.merchandisePdf} label="Abrir adjunto" />
+              {canMove ? <button className="btn" type="button" onClick={() => setShowMove((value) => !value)} aria-expanded={showMove}><CalendarDays size={15} /> Pasar a otro día</button> : null}
               {canEdit ? <button className="btn" type="button" onClick={() => onEdit ? onEdit(task) : beginEditing()}><Edit3 size={15} /> Editar</button> : null}
               {canEdit ? <button className="iconBtn danger" type="button" onClick={() => onDelete(task)} aria-label="Eliminar tarea" title="Eliminar tarea"><Trash2 size={16} /></button> : null}
               {canOperateThisTask && task.status !== "realizada" && task.status !== "en-trabajo" ? <button className="btn" onClick={() => onStatus(task, "en-trabajo")}>Iniciar</button> : null}
@@ -1813,6 +1969,14 @@ function DailyTask({ task, db, users = [], canOperate, canChangeStatus, currentU
             </>
           )}
         </div>
+        {showMove && !editing && canMove ? (
+          <form className="taskMoveForm" onSubmit={submitMove}>
+            <label>Nuevo día <input type="date" value={moveDate} min={nextDayISO(task.date)} onChange={(event) => setMoveDate(event.target.value)} required aria-label="Nuevo día de la tarea" /></label>
+            <button className="btn primary compact" type="submit" disabled={moving || !moveDate || moveDate <= task.date}>{moving ? "Pasando..." : "Confirmar cambio"}</button>
+            <button className="btn compact" type="button" onClick={() => setShowMove(false)} disabled={moving}>Cancelar</button>
+            <small>La tarea quedará sin horario en el día elegido.</small>
+          </form>
+        ) : null}
       </div>
     </details>
   );
@@ -1857,6 +2021,8 @@ function NewTaskForm({ db, prefill, initialTask = null, currentDriverId, canAssi
   const [calculating, setCalculating] = useState(false);
   const [saving, setSaving] = useState(false);
   const [pdf, setPdf] = useState(null);
+  const [voiceNote, setVoiceNote] = useState(initialTask?.voiceNote || null);
+  const [recordingVoice, setRecordingVoice] = useState(false);
   const isEditing = Boolean(initialTask);
   const canSetSchedule = canAssignSchedule;
   const formResetKey = [
@@ -1872,6 +2038,8 @@ function NewTaskForm({ db, prefill, initialTask = null, currentDriverId, canAssi
     setSaving(false);
     setForm(taskToForm(initialTask, prefill, currentDriverId, db));
     setPdf(null);
+    setVoiceNote(initialTask?.voiceNote || null);
+    setRecordingVoice(false);
     setRouteInfo({
       status: initialTask?.distance ? `${initialTask.distance} km entre destinos, estimado guardado.` : "Google Maps usara tu ubicacion actual para iniciar el recorrido.",
       distance: initialTask?.distance || "",
@@ -1959,6 +2127,8 @@ function NewTaskForm({ db, prefill, initialTask = null, currentDriverId, canAssi
   async function submit(event) {
     event.preventDefault();
     if (savingRef.current) return;
+    if (recordingVoice) { onError("Detene la grabacion antes de guardar la tarea."); return; }
+    if (!form.title.trim() && !voiceNote?.data) { onError("Agrega un titulo o un audio para la tarea."); return; }
     if (selectedScheduleBlock) return;
     const scheduleMode = canSetSchedule ? form.scheduleMode : scheduleModeForTask(initialTask);
     const isBlock = scheduleMode === "block";
@@ -1990,11 +2160,12 @@ function NewTaskForm({ db, prefill, initialTask = null, currentDriverId, canAssi
       await onCreate({
         ...initialTask,
         id: taskId,
-        title: form.title,
-        description: form.title,
+        title: form.title.trim() || "Tarea con audio",
+        description: form.title.trim() || "Tarea con audio",
         merchandise: form.merchandise,
         quantities: form.quantities,
         merchandisePdf,
+        voiceNote,
         observations: form.observations,
         date: canSetSchedule ? (form.date || localISO()) : (initialTask?.date || form.date || localISO()),
         start: canSetSchedule && scheduleMode !== "unscheduled" ? form.start : (initialTask?.start || ""),
@@ -2031,7 +2202,7 @@ function NewTaskForm({ db, prefill, initialTask = null, currentDriverId, canAssi
       <form className="taskForm" onSubmit={submit}>
         <Accordion title="1. Que hay que hacer">
           <label>Titulo</label>
-          <input value={form.title} onChange={(event) => update("title", event.target.value)} required />
+          <input value={form.title} onChange={(event) => update("title", event.target.value)} required={!voiceNote?.data} placeholder={voiceNote?.data ? "Opcional si grabaste un audio" : ""} />
           <div className="row">
             <div><label>Mercaderia <small>(opcional)</small></label><input value={form.merchandise} onChange={(event) => update("merchandise", event.target.value)} /></div>
             <div><label>Cantidades <small>(opcional)</small></label><input value={form.quantities} onChange={(event) => update("quantities", event.target.value)} /></div>
@@ -2044,6 +2215,7 @@ function NewTaskForm({ db, prefill, initialTask = null, currentDriverId, canAssi
           </label>
           <label>Observaciones</label>
           <textarea value={form.observations} onChange={(event) => update("observations", event.target.value)} />
+          <VoiceNoteEditor value={voiceNote} onChange={setVoiceNote} onError={onError} onRecordingChange={setRecordingVoice} />
           {canSetSchedule ? (
             <>
               <label>Horario</label>
@@ -2113,7 +2285,7 @@ function NewTaskForm({ db, prefill, initialTask = null, currentDriverId, canAssi
 
         <div className="actions">
           <button className="btn" type="button" onClick={onCancel}>Cancelar</button>
-          <button className="btn primary" disabled={calculating || saving || Boolean(selectedScheduleBlock)}>{saving ? "Guardando..." : isEditing ? "Guardar cambios" : form.scheduleMode === "block" ? "Guardar bloqueo y asignar" : "Guardar y asignar tarea"}</button>
+          <button className="btn primary" disabled={calculating || saving || recordingVoice || Boolean(selectedScheduleBlock)}>{saving ? "Guardando..." : isEditing ? "Guardar cambios" : form.scheduleMode === "block" ? "Guardar bloqueo y asignar" : voiceNote?.data ? "Guardar y asignar tarea con audio" : "Guardar y asignar tarea"}</button>
         </div>
         {selectedScheduleBlock ? (
           <div className="routeNotice scheduleBlockError">
@@ -2123,7 +2295,7 @@ function NewTaskForm({ db, prefill, initialTask = null, currentDriverId, canAssi
       </form>
       <aside className="summaryCard">
         <span className="eyebrow">RESUMEN</span>
-        <p><b>{form.title || "Nueva tarea"}</b></p>
+        <p><b>{form.title || (voiceNote?.data ? "Tarea con audio" : "Nueva tarea")}</b></p>
         <p>{previewDestination}</p>
         <p>{form.start ? formatTime24(form.start) : "Sin horario"}{routeInfo.distance ? ` - ${routeInfo.distance} km` : " - distancia sin calcular"}</p>
       </aside>

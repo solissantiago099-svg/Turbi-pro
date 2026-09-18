@@ -766,6 +766,40 @@ textarea {
   text-decoration: none;
 }
 
+.taskMoveForm {
+  display: flex;
+  align-items: end;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-top: 12px;
+  padding: 12px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: #fffdf8;
+}
+
+.taskMoveForm label {
+  display: grid;
+  gap: 5px;
+  color: var(--muted);
+  font-size: 13px;
+  font-weight: 800;
+}
+
+.taskMoveForm input[type="date"] {
+  min-height: 38px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  padding: 6px 10px;
+  background: #fffdf8;
+  color: var(--ink);
+}
+
+.taskMoveForm small {
+  flex-basis: 100%;
+  color: var(--muted);
+}
+
 .routeTaskGroup {
   margin-bottom: 14px;
   border: 1px solid var(--line);
@@ -1177,6 +1211,58 @@ textarea {
   color: var(--muted);
 }
 
+.voiceNoteEditor {
+  display: grid;
+  gap: 10px;
+  margin-top: 16px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  padding: 12px;
+  background: #fffdf8;
+}
+
+.voiceNoteActions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.voiceNoteUpload {
+  cursor: pointer;
+}
+
+.voiceNoteUpload input {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  opacity: 0;
+}
+
+.voiceNoteEditor audio,
+.voiceNotePlayer audio {
+  display: block;
+  width: min(100%, 360px);
+  max-width: 100%;
+}
+
+.voiceNoteActions .recording {
+  border-color: #b24842;
+  color: #9b302b;
+  background: #fff1ee;
+}
+
+.recordingHint {
+  color: #9b302b;
+  font-weight: 800;
+}
+
+.voiceNotePlayer {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 8px;
+  max-width: 100%;
+}
 .quickAddresses {
   display: flex;
   flex-wrap: wrap;
@@ -2392,6 +2478,17 @@ textarea {
 
   .agendaHead {
     align-items: flex-start;
+  }
+
+  .agendaStickyNav .scheduleSummary {
+    flex-wrap: wrap;
+  }
+
+  .agendaStickyNav .scheduleSummary .btn {
+    width: 100%;
+    justify-content: center;
+    white-space: normal;
+    text-align: center;
   }
 
   .scheduleSummary {
