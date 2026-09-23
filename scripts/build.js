@@ -108,6 +108,13 @@ let databaseReady;
 function normalizedRole(role) {
   return role === "supervisor" ? "admin" : role || "chofer";
 }
+
+function isDemoTaskRecord(task) {
+  const id = String(task?.id || "");
+  const title = String(task?.title || "");
+  return (id === "1" && title === "Retiro y entrega de bebidas")
+    || (id === "2" && title === "Entrega de catering");
+}
 function isScheduleOnlyChange(previousTask, nextTask, user) {
   const role = normalizedRole(user?.role);
   if (!["admin", "usuario", "chofer"].includes(role) || previousTask.start || !nextTask.start) return false;
@@ -812,7 +819,12 @@ async function bumpRevision(env, user) {
 }
 
 async function stateData(env) {
-  const tasks = await readRecords(env, "task");
+  const storedTasks = await readRecords(env, "task");
+  const demoTasks = storedTasks.filter(isDemoTaskRecord);
+  if (demoTasks.length) {
+    await env.DB.batch(demoTasks.map((task) => env.DB.prepare("DELETE FROM app_records WHERE type = ? AND id = ?").bind("task", String(task.id))));
+  }
+  const tasks = storedTasks.filter((task) => !isDemoTaskRecord(task));
   const vehicles = await readRecords(env, "vehicle");
   const drivers = await readRecords(env, "driver");
   const settings = await readSettings(env);

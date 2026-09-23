@@ -415,42 +415,7 @@ function PrintAttachmentButton({ file, label = "Imprimir adjunto", className = "
 }
 
 const seed = {
-  tasks: [
-    {
-      id: 1,
-      date: localISO(),
-      start: "07:30",
-      title: "Retiro y entrega de bebidas",
-      description: "Retirar 12 cajas de bebidas y entregarlas.",
-      merchandise: "Bebidas",
-      quantities: "12 cajas",
-      origin: "Juncal 4431, CABA",
-      destination: "Av. Rafael Obligado 1229, CABA",
-      contact: "Martin Gonzalez",
-      phone: "1144442222",
-      status: "pendiente",
-      duration: 35,
-      vehicleId: 1,
-      driverId: 1,
-    },
-    {
-      id: 2,
-      date: localISO(),
-      start: "10:00",
-      title: "Entrega de catering",
-      description: "Entrega de insumos para evento.",
-      merchandise: "Insumos de catering",
-      quantities: "8 bultos",
-      origin: "Av. Cantilo 7350, CABA",
-      destination: "Av. San Martin 1470, Caseros",
-      contact: "Laura Diaz",
-      phone: "1155556677",
-      status: "en-trabajo",
-      duration: 50,
-      vehicleId: 1,
-      driverId: 1,
-    },
-  ],
+  tasks: [],
   drivers: [{ id: 1, name: "Juan Perez", phone: "11 5555-5555", license: "B2", licenseExpiry: addDays(55), status: "disponible" }],
   vehicles: [{
     id: 1,
