@@ -1986,6 +1986,7 @@ function NewTaskForm({ db, prefill, initialTask = null, currentDriverId, canAssi
   const [calculating, setCalculating] = useState(false);
   const [saving, setSaving] = useState(false);
   const [pdf, setPdf] = useState(null);
+  const [pdfDragActive, setPdfDragActive] = useState(false);
   const [voiceNote, setVoiceNote] = useState(initialTask?.voiceNote || null);
   const [recordingVoice, setRecordingVoice] = useState(false);
   const isEditing = Boolean(initialTask);
@@ -2003,6 +2004,7 @@ function NewTaskForm({ db, prefill, initialTask = null, currentDriverId, canAssi
     setSaving(false);
     setForm(taskToForm(initialTask, prefill, currentDriverId, db));
     setPdf(null);
+    setPdfDragActive(false);
     setVoiceNote(initialTask?.voiceNote || null);
     setRecordingVoice(false);
     setRouteInfo({
@@ -2058,6 +2060,25 @@ function NewTaskForm({ db, prefill, initialTask = null, currentDriverId, canAssi
 
   function removeStop(index) {
     setForm((current) => ({ ...current, stops: current.stops.filter((_, stopIndex) => stopIndex !== index) }));
+  }
+
+  function selectAttachment(file) {
+    if (!file) return;
+    if (!isSupportedAttachment(file)) {
+      onError("El adjunto debe ser PDF o una foto JPG, PNG o WebP.");
+      return;
+    }
+    if (file.size > 1500000) {
+      onError("El archivo supera el maximo de 1,5 MB.");
+      return;
+    }
+    setPdf(file);
+  }
+
+  function dropAttachment(event) {
+    event.preventDefault();
+    setPdfDragActive(false);
+    selectAttachment(event.dataTransfer.files?.[0]);
   }
 
   async function geocodeAddress(address) {
@@ -2173,10 +2194,16 @@ function NewTaskForm({ db, prefill, initialTask = null, currentDriverId, canAssi
             <div><label>Cantidades <small>(opcional)</small></label><input value={form.quantities} onChange={(event) => update("quantities", event.target.value)} /></div>
           </div>
           <label>Adjuntar PDF o foto de mercaderia o cantidades <small>(opcional - maximo 1,5 MB)</small></label>
-          <label className="pdfUpload">
-            <input type="file" accept="application/pdf,image/jpeg,image/png,image/webp,.pdf,.jpg,.jpeg,.png,.webp" onChange={(event) => setPdf(event.target.files?.[0] || null)} />
-            <span>Seleccionar PDF o foto</span>
-            <small>{pdf?.name || initialTask?.merchandisePdf?.name || "Ningun archivo seleccionado"}</small>
+          <label
+            className={`pdfUpload ${pdfDragActive ? "dragging" : ""} ${pdf?.name ? "hasFile" : ""}`}
+            onDragEnter={(event) => { event.preventDefault(); setPdfDragActive(true); }}
+            onDragOver={(event) => { event.preventDefault(); event.dataTransfer.dropEffect = "copy"; setPdfDragActive(true); }}
+            onDragLeave={(event) => { if (!event.currentTarget.contains(event.relatedTarget)) setPdfDragActive(false); }}
+            onDrop={dropAttachment}
+          >
+            <input type="file" accept="application/pdf,image/jpeg,image/png,image/webp,.pdf,.jpg,.jpeg,.png,.webp" onChange={(event) => selectAttachment(event.target.files?.[0])} />
+            <span>{pdfDragActive ? "Solta el archivo aca" : "Arrastra un PDF o toca para elegir"}</span>
+            <small>{pdf?.name || initialTask?.merchandisePdf?.name || "Tambien acepta fotos JPG, PNG o WebP"}</small>
           </label>
           <label>Observaciones</label>
           <textarea value={form.observations} onChange={(event) => update("observations", event.target.value)} />

@@ -1187,16 +1187,35 @@ textarea {
 }
 
 .pdfUpload {
-  min-height: 62px;
-  display: flex;
+  min-height: 92px;
+  display: grid;
+  place-items: center;
+  align-content: center;
   align-items: center;
-  justify-content: space-between;
-  gap: 12px;
+  gap: 5px;
   border: 1px dashed #c8bfb2;
   border-radius: 8px;
   padding: 12px;
   background: #fbf7ee;
   cursor: pointer;
+  text-align: center;
+  transition: border-color 0.16s ease, background 0.16s ease, box-shadow 0.16s ease;
+}
+
+.pdfUpload:hover,
+.pdfUpload.dragging {
+  border-color: var(--green);
+  background: #f0f1dc;
+  box-shadow: inset 0 0 0 1px rgba(43, 66, 56, 0.12);
+}
+
+.pdfUpload.dragging {
+  border-style: solid;
+}
+
+.pdfUpload.hasFile {
+  border-color: #9faa68;
+  background: #f4f6df;
 }
 
 .pdfUpload input {
@@ -1209,6 +1228,7 @@ textarea {
 
 .pdfUpload small {
   color: var(--muted);
+  overflow-wrap: anywhere;
 }
 
 .voiceNoteEditor {
